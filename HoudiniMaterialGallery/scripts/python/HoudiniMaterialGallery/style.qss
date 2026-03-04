@@ -1,0 +1,209 @@
+/* Modern Dark Minimalist Theme for Houdini Material Gallery - Redesign */
+
+QWidget {
+    background-color: #1e1e1e;
+    color: #e0e0e0;
+    font-family: "Segoe UI", "Helvetica Neue", Helvetica, Arial, sans-serif;
+    font-size: 13px;
+}
+
+/* Base frames */
+QFrame {
+    border: none;
+}
+
+/* Buttons */
+QPushButton {
+    background-color: transparent;
+    border: 1px solid #3d3d3d;
+    border-radius: 4px;
+    padding: 6px 12px;
+    color: #e0e0e0;
+}
+
+QPushButton:hover {
+    background-color: #2d2d2d;
+    border: 1px solid #555555;
+}
+
+QPushButton:pressed {
+    background-color: #404040;
+}
+
+/* Primary or important buttons can have a subtle tint if needed, but keeping it minimal */
+
+/* Dropdown (ComboBox) */
+QComboBox {
+    background-color: #252525;
+    border: 1px solid #3a3a3a;
+    border-radius: 4px;
+    padding: 6px 12px;
+    padding-right: 28px;
+    color: #e0e0e0;
+    font-size: 14px;
+    font-weight: bold;
+}
+
+QComboBox:hover {
+    border: 1px solid #555555;
+    background-color: #2a2a2a;
+}
+
+QComboBox::drop-down {
+    subcontrol-origin: padding;
+    subcontrol-position: center right;
+    width: 20px;
+    border-left: 1px solid #3a3a3a;
+    background-color: transparent;
+}
+
+QComboBox::down-arrow {
+    image: url("__COMBO_ARROW_ICON__");
+    width: 8px;
+    height: 5px;
+    margin-right: 3px;
+}
+
+QComboBox QAbstractItemView {
+    background-color: #252525;
+    border: 1px solid #3a3a3a;
+    selection-background-color: #3875d7;
+    selection-color: #ffffff;
+    outline: none;
+}
+
+/* Line Edit / Search bar */
+QLineEdit {
+    background-color: #202020;
+    border: 1px solid #303030;
+    border-radius: 4px;
+    padding: 6px 12px;
+    color: #e0e0e0;
+}
+
+QLineEdit:focus {
+    border: 1px solid #555555;
+    background-color: #252525;
+}
+
+/* Labels */
+QLabel#breadcrumb {
+    font-size: 14px;
+    color: #aaaaaa;
+}
+
+/* Checkbox */
+QCheckBox {
+    spacing: 8px;
+    color: #aaaaaa;
+}
+
+QCheckBox::indicator {
+    width: 14px;
+    height: 14px;
+    border-radius: 3px;
+    border: 1px solid #404040;
+    background-color: #202020;
+}
+
+QCheckBox::indicator:checked {
+    background-color: #4a90e2;
+    border: 1px solid #4a90e2;
+}
+
+/* Main Gallery ListView */
+QListView {
+    background-color: #171717; /* Slightly darker for the gallery area */
+    border: 1px solid #252525;
+    border-radius: 6px;
+    outline: none;
+    padding: 10px;
+}
+
+/* Scrollbars */
+QScrollBar:vertical {
+    border: none;
+    background: #1e1e1e;
+    width: 10px;
+    margin: 0px;
+}
+
+QScrollBar::handle:vertical {
+    background: #404040;
+    min-height: 20px;
+    border-radius: 5px;
+}
+
+QScrollBar::handle:vertical:hover {
+    background: #555555;
+}
+
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+    border: none;
+    background: none;
+}
+
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+    background: none;
+}
+
+/* View Mode Toggle (Segmented Control) */
+QPushButton#viewToggle {
+    background-color: #252525;
+    border: 1px solid #3a3a3a;
+    padding: 4px 14px;
+    color: #888888;
+    font-size: 11px;
+    font-weight: bold;
+}
+
+QPushButton#viewToggle:first-child {
+    border-radius: 4px 0px 0px 4px;
+    border-right: none;
+}
+
+QPushButton#viewToggle:last-child {
+    border-radius: 0px 4px 4px 0px;
+}
+
+QPushButton#viewToggle:hover {
+    background-color: #2d2d2d;
+    color: #cccccc;
+}
+
+QPushButton#viewToggle:checked {
+    background-color: #4a90e2;
+    border-color: #4a90e2;
+    color: #ffffff;
+}
+
+
+/* Custom Styles for new Buttons */
+QPushButton#btn_import {
+    background-color: #3875d7;
+    border: 1px solid #285ea8;
+    color: white;
+    font-weight: bold;
+}
+QPushButton#btn_import:hover {
+    background-color: #4a90e2;
+    border: 1px solid #3875d7;
+}
+
+QPushButton#btn_add_gsg {
+    background-color: #404040;
+}
+QPushButton#btn_add_gsg:hover {
+    background-color: #555555;
+}
+
+QPushButton#btn_settings {
+    background-color: #303030;
+    border: 1px solid #3d3d3d;
+    border-radius: 4px;
+    padding: 2px;
+}
+QPushButton#btn_settings:hover {
+    background-color: #404040;
+    border: 1px solid #555555;
+}

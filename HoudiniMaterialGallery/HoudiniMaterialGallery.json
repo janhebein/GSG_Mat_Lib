@@ -1,0 +1,10 @@
+{
+    "env": [
+        {
+            "HMG_LOCATION": "C:/path/to/HoudiniMaterialGallery"
+        }
+    ],
+    "path": [
+        "$HMG_LOCATION"
+    ]
+}

@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<pythonPanelDocument>
+  <interface name="material_gallery" label="GSG Mat Lib" icon="MISC_python" help_url="">
+    <script><![CDATA[
+import sys
+import importlib
+from HoudiniMaterialGallery import ui_main
+
+def reload_package(package):
+    import os
+    import types
+    prefix = package.__name__ + "."
+    
+    # Reload submodules first
+    for name, module in list(sys.modules.items()):
+        if name == package.__name__ or name.startswith(prefix):
+             try:
+                 importlib.reload(module)
+             except Exception:
+                 pass
+
+# Force reload on panel creation
+reload_package(ui_main)
+
+def createInterface():
+    # Re-import after reload to get fresh class
+    from HoudiniMaterialGallery import ui_main
+    return ui_main.MaterialGalleryWindow()
+]]></script>
+    <includeInPaneTabMenu menu_position="100" create_separator="false"/>
+    <help><![CDATA[]]></help>
+  </interface>
+</pythonPanelDocument>
