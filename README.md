@@ -2,11 +2,15 @@
 
 Simple Houdini Python Panel for browsing and dropping **materials**, **textures**, and **HDRIs** into a material network.
 
+![GSG Mat Lib UI](docs/ui.png)
+
 ## Includes
 - Materials view
 - Textures view
 - HDRIs view
-- Drag and drop to node file parameters
+- Drag and drop materials
+- Drag and drop textures/HDRIs to node file parameters
+- Right-click `Copy File Path` / `Copy Material Path`
 - Preview thumbnail caching
 
 ## Install (quick)
@@ -20,3 +24,4 @@ Simple Houdini Python Panel for browsing and dropping **materials**, **textures*
 ## Notes
 - This package is intentionally clean and does not include ODTools content.
 - Supported library tabs right now: `Materials`, `Textures`, `HDRIs`.
+- Supports only **Greyscale Gorilla** materials, textures, and HDRIs.
