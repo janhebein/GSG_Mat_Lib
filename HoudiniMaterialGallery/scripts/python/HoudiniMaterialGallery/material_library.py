@@ -103,7 +103,8 @@ def ensure_cached_thumbnail(original_path, size=300, allow_houdini=True):
     return None
 
 TEXTURE_TYPES = {
-    "albedo": ["albedo", "color", "basecolor", "diffuse", "base_color", "diff"],
+    "specularroughness": ["specularroughness", "specular_roughness", "specroughness", "spec_roughness", "reflroughness", "refl_roughness"],
+    "diffuseroughness": ["diffuseroughness", "diffuse_roughness", "diffroughness", "diff_roughness"],
     "roughness": ["roughness", "rough", "rgh"],
     "normal": ["normal", "nrm", "norm"],
     "displacement": ["displacement", "disp", "height"],
@@ -115,6 +116,7 @@ TEXTURE_TYPES = {
     "specular": ["specular", "spec", "refl"],
     "scatteringweight": ["scatteringweight", "scattering", "sssweight", "sss_weight", "transmission"],
     "sheencolor": ["sheencolor", "sheen_color"],
+    "albedo": ["albedo", "color", "basecolor", "diffuse", "base_color", "diff"],
 }
 
 THUMBNAIL_IDENTIFIERS = ["thumb", "preview", "thumbnail", "sphere"]

@@ -943,7 +943,7 @@ class MaterialGalleryWindow(QtWidgets.QWidget):
 
     def import_selected_material(self):
         """Import the selected material into the current Houdini network editor.
-        This follows the same pattern as ODTools' importAssetCommand()."""
+        This follows the same pattern as the legacy importAssetCommand()."""
         try:
             import hou
         except ImportError:
@@ -960,7 +960,7 @@ class MaterialGalleryWindow(QtWidgets.QWidget):
         if not item or item.is_folder:
             return
 
-        # Get current network editor context (same as ODTools getNetworkEditor)
+        # Get current network editor context (same as the legacy getNetworkEditor flow)
         network_editor = None
         for pane in hou.ui.paneTabs():
             if isinstance(pane, hou.NetworkEditor) and pane.isCurrentTab():

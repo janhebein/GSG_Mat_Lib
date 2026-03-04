@@ -24,6 +24,6 @@ Simple Houdini Python Panel for browsing and dropping **materials**, **textures*
 5. Open the Python Panel: `GSG Mat Lib`.
 
 ## Notes
-- This package is intentionally clean and does not include ODTools content.
 - Supported library tabs right now: `Materials`, `Textures`, `HDRIs`.
 - Supports only **Greyscale Gorilla** materials, textures, and HDRIs.
+- Huge thanks to [oakztream](https://github.com/oakztream) for helping and contributing, especially with mapping data and insights that improved the Octane node mapping.

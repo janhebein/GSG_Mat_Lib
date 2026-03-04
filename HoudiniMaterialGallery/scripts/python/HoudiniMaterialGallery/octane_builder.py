@@ -8,22 +8,31 @@ from .material_library import (
     VALID_EXTENSIONS,
     classify_texture_type,
 )
+from .octane_mappings import (
+    OCTANE_COLOR_SPACES,
+    OCTANE_DISPLACEMENT_PARMS,
+    OCTANE_NODE_TYPES,
+    OCTANE_STANDARD_SURFACE_INPUTS,
+    OCTANE_TEXTURE_INPUTS,
+)
 
 MATERIAL_CONTEXT_CATEGORIES = {"Mat", "Vop", "Shop", "Vopnet"}
 
 MAP_TYPES_TO_INPUTS = {
-    "albedo": ("baseColor", "octane::NT_TEX_IMAGE", True),
-    "roughness": ("diffuseRoughness", "octane::NT_TEX_FLOATIMAGE", False),
-    "metallic": ("metallic", "octane::NT_TEX_FLOATIMAGE", False),
-    "normal": ("normal", "octane::NT_TEX_IMAGE", False),
-    "displacement": ("displacement", "octane::NT_TEX_FLOATIMAGE", False),
-    "ao": ("ambientocclusion", "octane::NT_TEX_FLOATIMAGE", False),
-    "opacity": ("opacity", "octane::NT_TEX_FLOATIMAGE", False),
-    "emissive": ("emissionColor", "octane::NT_TEX_IMAGE", True),
-    "specular": ("specular", "octane::NT_TEX_FLOATIMAGE", False),
-    "scatteringweight": ("transmission", "octane::NT_TEX_FLOATIMAGE", False),
-    "sheencolor": ("sheenColor", "octane::NT_TEX_IMAGE", True),
-    "sheenopacity": ("sheenRoughness", "octane::NT_TEX_FLOATIMAGE", False),
+    "albedo": (OCTANE_STANDARD_SURFACE_INPUTS["base_color"], OCTANE_NODE_TYPES["tex_image"], True),
+    "specularroughness": (OCTANE_STANDARD_SURFACE_INPUTS["roughness"], OCTANE_NODE_TYPES["tex_float_image"], False),
+    "diffuseroughness": (OCTANE_STANDARD_SURFACE_INPUTS["diffuse_roughness"], OCTANE_NODE_TYPES["tex_float_image"], False),
+    "roughness": (OCTANE_STANDARD_SURFACE_INPUTS["roughness"], OCTANE_NODE_TYPES["tex_float_image"], False),
+    "metallic": (OCTANE_STANDARD_SURFACE_INPUTS["metallic"], OCTANE_NODE_TYPES["tex_float_image"], False),
+    "normal": (OCTANE_STANDARD_SURFACE_INPUTS["normal"], OCTANE_NODE_TYPES["tex_image"], False),
+    "displacement": (OCTANE_STANDARD_SURFACE_INPUTS["displacement"], OCTANE_NODE_TYPES["tex_float_image"], False),
+    "ao": (OCTANE_STANDARD_SURFACE_INPUTS["ambient_occlusion"], OCTANE_NODE_TYPES["tex_float_image"], False),
+    "opacity": (OCTANE_STANDARD_SURFACE_INPUTS["opacity"], OCTANE_NODE_TYPES["tex_float_image"], False),
+    "emissive": (OCTANE_STANDARD_SURFACE_INPUTS["emission_color"], OCTANE_NODE_TYPES["tex_image"], True),
+    "specular": (OCTANE_STANDARD_SURFACE_INPUTS["specular"], OCTANE_NODE_TYPES["tex_float_image"], False),
+    "scatteringweight": (OCTANE_STANDARD_SURFACE_INPUTS["transmission"], OCTANE_NODE_TYPES["tex_float_image"], False),
+    "sheencolor": (OCTANE_STANDARD_SURFACE_INPUTS["sheen_color"], OCTANE_NODE_TYPES["tex_image"], True),
+    "sheenopacity": (OCTANE_STANDARD_SURFACE_INPUTS["sheen_roughness"], OCTANE_NODE_TYPES["tex_float_image"], False),
 }
 
 
@@ -70,6 +79,20 @@ def _set_linear_gamma(texture_node):
     gamma_parm = texture_node.parm("gamma")
     if gamma_parm is not None:
         gamma_parm.set(1.0)
+
+
+def _set_texture_color_space(texture_node, use_srgb):
+    color_space_parms = ("colorSpace", "colorspace", "color_space")
+    target_space = OCTANE_COLOR_SPACES["srgb"] if use_srgb else OCTANE_COLOR_SPACES["linear"]
+    if _set_first_parm_value(texture_node, color_space_parms, target_space):
+        return
+
+    fallback_space = "sRGB" if use_srgb else "Other"
+    if _set_first_parm_value(texture_node, color_space_parms, fallback_space):
+        return
+
+    if not use_srgb:
+        _set_linear_gamma(texture_node)
 
 
 def _set_first_parm_value(node, parm_names, value):
@@ -127,7 +150,7 @@ def _set_first_parm_value(node, parm_names, value):
 def _create_2d_transform_node(vopnet):
     import hou
 
-    for node_type in ("octane::NT_TRANSFORM_2D", "NT_TRANSFORM_2D", "octane_transform_2d"):
+    for node_type in (OCTANE_NODE_TYPES["transform_2d"], "NT_TRANSFORM_2D", "octane_transform_2d"):
         try:
             return vopnet.createNode(node_type, "2D_transformation1")
         except hou.OperationFailed:
@@ -255,7 +278,7 @@ def build_material_from_texture_drop(parent_node, position, texture_path):
         node_type = parent_node.type().name()
         if "vopnet" in node_type.lower() or "materialbuilder" in node_type.lower() or parent_node.type().category().name() == "Vop":
             try:
-                texture_node = parent_node.createNode("octane::NT_TEX_IMAGE", "Image")
+                texture_node = parent_node.createNode(OCTANE_NODE_TYPES["tex_image"], "Image")
             except hou.OperationFailed:
                 try:
                     texture_node = parent_node.createNode("octane_image", "Image")
@@ -305,12 +328,12 @@ def build_material(parent_node, position, material_data):
 
     try:
         try:
-            vopnet = parent_node.createNode("octane_vopnet", node_name=material_name)
+            vopnet = parent_node.createNode(OCTANE_NODE_TYPES["vopnet"], node_name=material_name)
         except hou.OperationFailed as exc:
             try:
                 # Maybe the internal name is different in this Houdini/Octane version
                 # Let's try the other common Octane vopnet name
-                vopnet = parent_node.createNode("octane::octane_vopnet", node_name=material_name)
+                vopnet = parent_node.createNode(OCTANE_NODE_TYPES["vopnet_alt"], node_name=material_name)
             except hou.OperationFailed as exc2:
                 hou.ui.displayMessage(
                     "Failed to create octane_vopnet. Make sure Octane is installed and /mat is active.\n\n{0}\n{1}".format(exc, exc2)
@@ -323,14 +346,14 @@ def build_material(parent_node, position, material_data):
             child.destroy()
 
         try:
-            out_node = vopnet.createNode("octane::NT_OUT_MATERIAL", "octane_material1")
+            out_node = vopnet.createNode(OCTANE_NODE_TYPES["out_material"], "octane_material1")
         except hou.OperationFailed:
             out_node = vopnet.createNode("octane_material", "octane_material1")
             
         out_node.setPosition(hou.Vector2(3, 0))
 
         try:
-            standard_surface = vopnet.createNode("octane::NT_MAT_STANDARD_SURFACE", "Standard_Surface")
+            standard_surface = vopnet.createNode(OCTANE_NODE_TYPES["standard_surface"], "Standard_Surface")
         except hou.OperationFailed:
             standard_surface = vopnet.createNode("octane_standard_surface", "Standard_Surface")
             
@@ -340,14 +363,14 @@ def build_material(parent_node, position, material_data):
         displacement_node = None
         if maps.get("displacement"):
             try:
-                displacement_node = vopnet.createNode("octane::NT_DISPLACEMENT", "Displacement1")
+                displacement_node = vopnet.createNode(OCTANE_NODE_TYPES["displacement"], "Displacement1")
             except hou.OperationFailed:
                 displacement_node = vopnet.createNode("octane_displacement", "Displacement1")
                  
             displacement_node.setPosition(hou.Vector2(1.5, -4))
-            _connect_input_by_name(standard_surface, "displacement", displacement_node)
-            _set_first_parm_value(displacement_node, ("levelOfDetail", "levelofdetail"), 4096)
-            _set_first_parm_value(displacement_node, ("black_level", "midLevel", "mid_level"), 0.5)
+            _connect_input_by_name(standard_surface, OCTANE_STANDARD_SURFACE_INPUTS["displacement"], displacement_node)
+            _set_first_parm_value(displacement_node, OCTANE_DISPLACEMENT_PARMS["level_of_detail"], 4096)
+            _set_first_parm_value(displacement_node, OCTANE_DISPLACEMENT_PARMS["mid_level"], 0.5)
 
         y_offset = 4.0
         x_offset = -4.0
@@ -362,7 +385,7 @@ def build_material(parent_node, position, material_data):
             if not map_config:
                 # Unknown texture - create node but don't connect
                 try:
-                    texture_node = vopnet.createNode("octane::NT_TEX_IMAGE", nice_name)
+                    texture_node = vopnet.createNode(OCTANE_NODE_TYPES["tex_image"], nice_name)
                 except hou.OperationFailed:
                     texture_node = vopnet.createNode("octane_image", nice_name)
                 
@@ -371,7 +394,7 @@ def build_material(parent_node, position, material_data):
                  
                 _set_texture_file_parm(texture_node, texture_path)
                 if transform_2d_node is not None:
-                    _connect_input_by_name(texture_node, "transform", transform_2d_node)
+                    _connect_input_by_name(texture_node, OCTANE_TEXTURE_INPUTS["transform"], transform_2d_node)
                 texture_node.setPosition(hou.Vector2(x_offset, y_offset))
                 y_offset -= 2.5
                 continue
@@ -381,7 +404,9 @@ def build_material(parent_node, position, material_data):
             # Format nice name for specific recognized types
             nice_name = target_input_name[:1].upper() + target_input_name[1:]
             if nice_name == "BaseColor": nice_name = "Base_Color"
-            elif nice_name == "DiffuseRoughness": nice_name = "Roughness"
+            elif map_key == "diffuseroughness": nice_name = "Diffuse_Roughness"
+            elif map_key == "specularroughness": nice_name = "Specular_Roughness"
+            elif nice_name == "DiffuseRoughness": nice_name = "Diffuse_Roughness"
             elif nice_name == "Transmission": nice_name = "Scattering_Weight"
             elif nice_name == "SheenColor": nice_name = "Sheen_Color"
             elif nice_name == "SheenRoughness": nice_name = "Sheen_Roughness"
@@ -395,12 +420,11 @@ def build_material(parent_node, position, material_data):
                 
             try: texture_node.setName(nice_name, unique_name=True)
             except: pass
-                
+                 
             _set_texture_file_parm(texture_node, texture_path)
-            if not use_srgb:
-                _set_linear_gamma(texture_node)
+            _set_texture_color_space(texture_node, use_srgb)
             if transform_2d_node is not None:
-                _connect_input_by_name(texture_node, "transform", transform_2d_node)
+                _connect_input_by_name(texture_node, OCTANE_TEXTURE_INPUTS["transform"], transform_2d_node)
 
             texture_node.setPosition(hou.Vector2(x_offset, y_offset))
             y_offset -= 2.5
