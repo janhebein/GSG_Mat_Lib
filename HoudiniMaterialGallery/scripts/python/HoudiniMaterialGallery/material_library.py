@@ -93,7 +93,7 @@ def ensure_cached_thumbnail(original_path, size=300, allow_houdini=True):
             return False
 
     ext = os.path.splitext(normalized_path)[1].lower()
-    heavy_formats = {".exr", ".tif", ".tiff", ".tga"}
+    heavy_formats = {".exr", ".hdr", ".hdri", ".tif", ".tiff", ".tga"}
     converters = (_convert_with_houdini, _convert_with_pillow) if ext in heavy_formats else (_convert_with_pillow, _convert_with_houdini)
 
     for converter in converters:
@@ -319,6 +319,24 @@ class MaterialLibraryManager:
                     results.append(asset)
         return results
 
+    def get_gsg_hdris(self, library_root):
+        """Scans the GSG hdris/ subfolder. Each subfolder has .exr/.hdr + _preview.jpg."""
+        hdris_dir = os.path.join(library_root, "hdris")
+        results = []
+        if not os.path.isdir(hdris_dir):
+            return results
+        for item in sorted(os.listdir(hdris_dir)):
+            item_path = os.path.join(hdris_dir, item)
+            if os.path.isdir(item_path):
+                asset = HDRIAsset(item_path)
+                if asset.hdri_path:
+                    results.append(asset)
+        return results
+
+
+HDRI_EXTENSIONS = [".exr", ".hdr", ".hdri"]
+
+
 class TextureAsset:
     """Represents a single GSG texture (gobo/overlay/pattern)."""
     def __init__(self, path, is_file=False):
@@ -354,4 +372,42 @@ class TextureAsset:
             "thumbnail": self.thumbnail,
             "is_file": self.is_file,
             "texture_type": self.texture_type
+        }
+
+
+class HDRIAsset:
+    """Represents a single GSG HDRI."""
+
+    def __init__(self, path, is_file=False):
+        self.path = os.path.normpath(path)
+        self.name = os.path.basename(self.path)
+        self.is_file = is_file
+        self.hdri_path = self.path if is_file else None
+        self.thumbnail = None
+        if not is_file:
+            self._scan()
+
+    def _scan(self):
+        if not os.path.isdir(self.path):
+            return
+        for f in os.listdir(self.path):
+            fp = os.path.join(self.path, f)
+            if not os.path.isfile(fp):
+                continue
+            fl = f.lower()
+            ext = os.path.splitext(fl)[1]
+            if "_preview" in fl and ext in (".jpg", ".jpeg", ".png"):
+                self.thumbnail = fp
+            elif ext in HDRI_EXTENSIONS:
+                # Prefer .exr over .hdr
+                if self.hdri_path is None or ext == ".exr":
+                    self.hdri_path = fp
+
+    def to_dict(self):
+        return {
+            "name": self.name,
+            "path": self.path,
+            "hdri_path": self.hdri_path,
+            "thumbnail": self.thumbnail,
+            "is_file": self.is_file,
         }

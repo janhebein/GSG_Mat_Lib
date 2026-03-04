@@ -4,7 +4,7 @@ from .material_library import get_cached_thumb_path, ensure_cached_thumbnail
 
 _PIXMAP_CACHE = {}
 _MAX_PIXMAP_CACHE_ITEMS = 256
-_HEAVY_THUMB_EXTENSIONS = {".exr", ".tif", ".tiff", ".tga"}
+_HEAVY_THUMB_EXTENSIONS = {".exr", ".hdr", ".hdri", ".tif", ".tiff", ".tga"}
 
 
 def _load_scaled_pixmap(path, size):

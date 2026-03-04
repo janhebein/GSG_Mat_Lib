@@ -72,6 +72,38 @@ def _set_linear_gamma(texture_node):
         gamma_parm.set(1.0)
 
 
+def _snapshot_sibling_positions(parent_node):
+    snapshot = {}
+    try:
+        for child in parent_node.children():
+            snapshot[child.path()] = child.position()
+    except Exception:
+        pass
+    return snapshot
+
+
+def _restore_sibling_positions(parent_node, snapshot, excluded_nodes=()):
+    excluded_paths = set()
+    for node in excluded_nodes or ():
+        if node is None:
+            continue
+        try:
+            excluded_paths.add(node.path())
+        except Exception:
+            continue
+
+    for child in parent_node.children():
+        try:
+            child_path = child.path()
+            if child_path in excluded_paths:
+                continue
+            old_pos = snapshot.get(child_path)
+            if old_pos is not None:
+                child.setPosition(old_pos)
+        except Exception:
+            continue
+
+
 def _build_material_data_from_texture(texture_path):
     normalized_path = os.path.normpath(texture_path)
     if not os.path.isfile(normalized_path):
@@ -153,6 +185,7 @@ def _build_material_data_from_texture(texture_path):
 def build_material_from_texture_drop(parent_node, position, texture_path):
     import hou
     import os
+    sibling_positions = _snapshot_sibling_positions(parent_node)
     
     # If dropped inside a material builder, just create an image node!
     try:
@@ -181,10 +214,11 @@ def build_material_from_texture_drop(parent_node, position, texture_path):
             nice_name = "".join([c if c.isalnum() else "_" for c in nice_name])
             try: texture_node.setName(nice_name, unique_name=True)
             except: pass
-            
+            _restore_sibling_positions(parent_node, sibling_positions, excluded_nodes=(texture_node,))
             return texture_node
     except Exception as e:
         print("Failed to create standalone image node:", e)
+        _restore_sibling_positions(parent_node, sibling_positions)
         
     material_data = _build_material_data_from_texture(texture_path)
     build_material(parent_node, position, material_data)
@@ -203,114 +237,111 @@ def build_material(parent_node, position, material_data):
     material_name = material_data.get("name", "New_Material")
     material_name = hou.text.alphaNumeric(material_name) or "New_Material"
     maps = material_data.get("maps", {})
+    sibling_positions = _snapshot_sibling_positions(parent_node)
+    vopnet = None
 
     try:
-        vopnet = parent_node.createNode("octane_vopnet", node_name=material_name)
-    except hou.OperationFailed as exc:
         try:
-            # Maybe the internal name is different in this Houdini/Octane version
-            # Let's try the other common Octane vopnet name
-            vopnet = parent_node.createNode("octane::octane_vopnet", node_name=material_name)
-        except hou.OperationFailed as exc2:
-            hou.ui.displayMessage(
-                "Failed to create octane_vopnet. Make sure Octane is installed and /mat is active.\n\n{0}\n{1}".format(exc, exc2)
-            )
-            return None
-
-    vopnet.setPosition(position)
-
-    for child in list(vopnet.children()):
-        child.destroy()
-
-    try:
-        out_node = vopnet.createNode("octane::NT_OUT_MATERIAL", "octane_material1")
-    except hou.OperationFailed:
-        out_node = vopnet.createNode("octane_material", "octane_material1")
-        
-    out_node.setPosition(hou.Vector2(3, 0))
-
-    try:
-        standard_surface = vopnet.createNode("octane::NT_MAT_STANDARD_SURFACE", "Standard_Surface")
-    except hou.OperationFailed:
-        standard_surface = vopnet.createNode("octane_standard_surface", "Standard_Surface")
-        
-    standard_surface.setPosition(hou.Vector2(0, 0))
-    out_node.setInput(0, standard_surface, 0)
-
-    displacement_node = None
-    if maps.get("displacement"):
-        try:
-            displacement_node = vopnet.createNode("octane::NT_DISPLACEMENT", "Displacement1")
-        except hou.OperationFailed:
-            displacement_node = vopnet.createNode("octane_displacement", "Displacement1")
-            
-        displacement_node.setPosition(hou.Vector2(1.5, -4))
-        _connect_input_by_name(standard_surface, "displacement", displacement_node)
-
-    y_offset = 4.0
-    x_offset = -4.0
-
-    for map_key, texture_path in maps.items():
-        map_config = MAP_TYPES_TO_INPUTS.get(map_key)
-        nice_name = map_key.capitalize()
-
-        if not map_config:
-            # Unknown texture - create node but don't connect
+            vopnet = parent_node.createNode("octane_vopnet", node_name=material_name)
+        except hou.OperationFailed as exc:
             try:
-                texture_node = vopnet.createNode("octane::NT_TEX_IMAGE", nice_name)
-            except hou.OperationFailed:
-                texture_node = vopnet.createNode("octane_image", nice_name)
+                # Maybe the internal name is different in this Houdini/Octane version
+                # Let's try the other common Octane vopnet name
+                vopnet = parent_node.createNode("octane::octane_vopnet", node_name=material_name)
+            except hou.OperationFailed as exc2:
+                hou.ui.displayMessage(
+                    "Failed to create octane_vopnet. Make sure Octane is installed and /mat is active.\n\n{0}\n{1}".format(exc, exc2)
+                )
+                return None
+
+        vopnet.setPosition(position)
+
+        for child in list(vopnet.children()):
+            child.destroy()
+
+        try:
+            out_node = vopnet.createNode("octane::NT_OUT_MATERIAL", "octane_material1")
+        except hou.OperationFailed:
+            out_node = vopnet.createNode("octane_material", "octane_material1")
             
+        out_node.setPosition(hou.Vector2(3, 0))
+
+        try:
+            standard_surface = vopnet.createNode("octane::NT_MAT_STANDARD_SURFACE", "Standard_Surface")
+        except hou.OperationFailed:
+            standard_surface = vopnet.createNode("octane_standard_surface", "Standard_Surface")
+            
+        standard_surface.setPosition(hou.Vector2(0, 0))
+        out_node.setInput(0, standard_surface, 0)
+
+        displacement_node = None
+        if maps.get("displacement"):
+            try:
+                displacement_node = vopnet.createNode("octane::NT_DISPLACEMENT", "Displacement1")
+            except hou.OperationFailed:
+                displacement_node = vopnet.createNode("octane_displacement", "Displacement1")
+                
+            displacement_node.setPosition(hou.Vector2(1.5, -4))
+            _connect_input_by_name(standard_surface, "displacement", displacement_node)
+
+        y_offset = 4.0
+        x_offset = -4.0
+
+        for map_key, texture_path in maps.items():
+            map_config = MAP_TYPES_TO_INPUTS.get(map_key)
+            nice_name = map_key.capitalize()
+
+            if not map_config:
+                # Unknown texture - create node but don't connect
+                try:
+                    texture_node = vopnet.createNode("octane::NT_TEX_IMAGE", nice_name)
+                except hou.OperationFailed:
+                    texture_node = vopnet.createNode("octane_image", nice_name)
+                
+                try: texture_node.setName(nice_name, unique_name=True)
+                except: pass
+                
+                _set_texture_file_parm(texture_node, texture_path)
+                texture_node.setPosition(hou.Vector2(x_offset, y_offset))
+                y_offset -= 2.5
+                continue
+
+            target_input_name, node_type, use_srgb = map_config
+            
+            # Format nice name for specific recognized types
+            nice_name = target_input_name[:1].upper() + target_input_name[1:]
+            if nice_name == "BaseColor": nice_name = "Base_Color"
+            elif nice_name == "DiffuseRoughness": nice_name = "Roughness"
+            elif nice_name == "Transmission": nice_name = "Scattering_Weight"
+            elif nice_name == "SheenColor": nice_name = "Sheen_Color"
+            elif nice_name == "SheenRoughness": nice_name = "Sheen_Roughness"
+            
+            try:
+                texture_node = vopnet.createNode(node_type, nice_name)
+            except hou.OperationFailed:
+                # Fallback if `octane::NT_TEX_IMAGE` or `octane::NT_TEX_FLOATIMAGE` fail
+                fallback_type = "octane_image" if "IMAGE" in node_type else "octane_floatimage"
+                texture_node = vopnet.createNode(fallback_type, nice_name)
+                
             try: texture_node.setName(nice_name, unique_name=True)
             except: pass
-            
+                
             _set_texture_file_parm(texture_node, texture_path)
+            if not use_srgb:
+                _set_linear_gamma(texture_node)
+
             texture_node.setPosition(hou.Vector2(x_offset, y_offset))
             y_offset -= 2.5
-            continue
 
-        target_input_name, node_type, use_srgb = map_config
-        
-        # Format nice name for specific recognized types
-        nice_name = target_input_name[:1].upper() + target_input_name[1:]
-        if nice_name == "BaseColor": nice_name = "Base_Color"
-        elif nice_name == "DiffuseRoughness": nice_name = "Roughness"
-        elif nice_name == "Transmission": nice_name = "Scattering_Weight"
-        elif nice_name == "SheenColor": nice_name = "Sheen_Color"
-        elif nice_name == "SheenRoughness": nice_name = "Sheen_Roughness"
-        
-        try:
-            texture_node = vopnet.createNode(node_type, nice_name)
-        except hou.OperationFailed:
-            # Fallback if `octane::NT_TEX_IMAGE` or `octane::NT_TEX_FLOATIMAGE` fail
-            fallback_type = "octane_image" if "IMAGE" in node_type else "octane_floatimage"
-            texture_node = vopnet.createNode(fallback_type, nice_name)
-            
-        try: texture_node.setName(nice_name, unique_name=True)
-        except: pass
-            
-        _set_texture_file_parm(texture_node, texture_path)
-        if not use_srgb:
-            _set_linear_gamma(texture_node)
+            if map_key == "displacement" and displacement_node is not None:
+                displacement_node.setInput(0, texture_node, 0)
+                continue
 
-        texture_node.setPosition(hou.Vector2(x_offset, y_offset))
-        y_offset -= 2.5
+            _connect_input_by_name(standard_surface, target_input_name, texture_node)
 
-        if map_key == "displacement" and displacement_node is not None:
-            displacement_node.setInput(0, texture_node, 0)
-            continue
-
-        _connect_input_by_name(standard_surface, target_input_name, texture_node)
-
-    vopnet.layoutChildren()
-    vopnet.setSelected(True, clear_all_selected=True)
-    _safe_status("Created Octane Material: {0}".format(material_name))
-
-    try:
-        pane = hou.ui.paneTabOfType(hou.paneTabType.NetworkEditor)
-        if pane:
-            pane.homeToSelection()
-    except Exception:
-        pass
-
-    return vopnet
+        vopnet.layoutChildren()
+        vopnet.setSelected(True, clear_all_selected=True)
+        _safe_status("Created Octane Material: {0}".format(material_name))
+        return vopnet
+    finally:
+        _restore_sibling_positions(parent_node, sibling_positions, excluded_nodes=(vopnet,))

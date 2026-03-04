@@ -21,14 +21,49 @@ class MaterialListView(QtWidgets.QListView):
         self.setDragEnabled(False)  # We handle our own drag
         self._dragging_item = None
         self._drag_start_pos = None
-        self._mouse_grabbed = False
+        self._drag_watchdog = QtCore.QTimer(self)
+        self._drag_watchdog.setInterval(120)
+        self._drag_watchdog.timeout.connect(self._on_drag_watchdog_tick)
+
+    def _clear_drag_state(self):
+        self._dragging_item = None
+        self._drag_start_pos = None
+        if self._drag_watchdog.isActive():
+            self._drag_watchdog.stop()
+        self.setCursor(QtCore.Qt.ArrowCursor)
+
+    def _start_drag_watchdog(self):
+        if not self._drag_watchdog.isActive():
+            self._drag_watchdog.start()
+
+    def _on_drag_watchdog_tick(self):
+        if self._dragging_item is None:
+            if self._drag_watchdog.isActive():
+                self._drag_watchdog.stop()
+            return
+
+        # Handle release globally even when the list view itself didn't receive
+        # the mouse release event (common when dragging outside panel bounds).
+        if not (QtWidgets.QApplication.mouseButtons() & QtCore.Qt.LeftButton):
+            item = self._dragging_item
+            self._clear_drag_state()
+            if item is not None:
+                self._handle_item_drop(item)
     
     def mousePressEvent(self, event):
+        # Reset any stale drag state before starting a new interaction.
+        if self._dragging_item is not None:
+            self._clear_drag_state()
         if event.button() == QtCore.Qt.LeftButton:
             self._drag_start_pos = event.pos()
         super().mousePressEvent(event)
     
     def mouseMoveEvent(self, event):
+        if self._dragging_item is not None and not (event.buttons() & QtCore.Qt.LeftButton):
+            self._clear_drag_state()
+            super().mouseMoveEvent(event)
+            return
+
         if (self._drag_start_pos is not None and
             event.buttons() & QtCore.Qt.LeftButton):
             distance = (event.pos() - self._drag_start_pos).manhattanLength()
@@ -42,13 +77,25 @@ class MaterialListView(QtWidgets.QListView):
                     
                     if item and not item.is_folder:
                         self._dragging_item = item
-                        try:
-                            self.grabMouse(QtCore.Qt.ClosedHandCursor)
-                            self._mouse_grabbed = True
-                        except Exception:
-                            self.setCursor(QtCore.Qt.ClosedHandCursor)
+                        self.setCursor(QtCore.Qt.ClosedHandCursor)
+                        self._start_drag_watchdog()
                         return  # Consume the event, we're in drag mode
         super().mouseMoveEvent(event)
+
+    @staticmethod
+    def _defer_drop_action(callback):
+        def _safe_call():
+            try:
+                callback()
+            except Exception as exc:
+                print("[MaterialGallery] Deferred drop action failed:", exc)
+                traceback.print_exc()
+
+        try:
+            import hdefereval
+            hdefereval.executeDeferred(_safe_call)
+        except Exception:
+            QtCore.QTimer.singleShot(0, _safe_call)
     
     @staticmethod
     def _pane_tab_under_cursor(hou_module):
@@ -69,91 +116,98 @@ class MaterialListView(QtWidgets.QListView):
     def mouseReleaseEvent(self, event):
         if self._dragging_item is not None and event.button() == QtCore.Qt.LeftButton:
             item = self._dragging_item
-            self._dragging_item = None
-            self._drag_start_pos = None
-            if self._mouse_grabbed:
-                try:
-                    self.releaseMouse()
-                except Exception:
-                    pass
-                self._mouse_grabbed = False
-            self.setCursor(QtCore.Qt.ArrowCursor)
-            
-            # Check if released over a Houdini Network Editor
-            try:
-                import hou
-                pane = self._pane_tab_under_cursor(hou)
-                handled = False
-
-                if pane and pane.type() == hou.paneTabType.NetworkEditor:
-                    network_node = pane.pwd()
-                    try:
-                        pos = pane.cursorPosition()
-                    except Exception:
-                        try:
-                            pos = pane.visibleBounds().center()
-                        except Exception:
-                            pos = hou.Vector2(0, 0)
-                    
-                    if hasattr(item, 'is_simple_file') and item.is_simple_file:
-                        # For textures: check if dropped ON a node
-                        dropped_node = self._find_node_at_pos(network_node, pos)
-                        if dropped_node:
-                            # Try to set any file-type parameter on the node
-                            if self._set_file_parm_on_node(dropped_node, item.path, getattr(item, "texture_type", None)):
-                                handled = True
-                            else:
-                                # No file parm found, create an image node
-                                from .octane_builder import build_material_from_texture_drop
-                                build_material_from_texture_drop(network_node, pos, item.path)
-                                handled = True
-                        else:
-                            selected_nodes = hou.selectedNodes()
-                            if selected_nodes:
-                                handled = self._set_file_parm_on_node(
-                                    selected_nodes[0],
-                                    item.path,
-                                    getattr(item, "texture_type", None),
-                                )
-                            if not handled:
-                                # Dropped on empty space, create node
-                                from .octane_builder import build_material_from_texture_drop
-                                build_material_from_texture_drop(network_node, pos, item.path)
-                                handled = True
-                    else:
-                        from .octane_builder import build_material
-                        material_data = item.data.to_dict()
-                        build_material(network_node, pos, material_data)
-                        handled = True
-
-                if hasattr(item, "is_simple_file") and item.is_simple_file and not handled:
-                    handled = self._set_file_parm_in_parameter_pane(
-                        pane,
-                        item.path,
-                        getattr(item, "texture_type", None),
-                    )
-
-                if hasattr(item, "is_simple_file") and item.is_simple_file and not handled:
-                    selected_nodes = hou.selectedNodes()
-                    if selected_nodes:
-                        self._set_file_parm_on_node(
-                            selected_nodes[0],
-                            item.path,
-                            getattr(item, "texture_type", None),
-                        )
-            except Exception as e:
-                print("[MaterialGallery] Drop error:", e)
-                traceback.print_exc()
+            self._clear_drag_state()
+            self._handle_item_drop(item)
             return
         
         self._drag_start_pos = None
-        if self._mouse_grabbed:
-            try:
-                self.releaseMouse()
-            except Exception:
-                pass
-            self._mouse_grabbed = False
         super().mouseReleaseEvent(event)
+
+    def _handle_item_drop(self, item):
+        try:
+            if hasattr(item, "is_simple_file") and item.is_simple_file:
+                if self._set_text_on_widget_under_cursor(item.path, excluded_root=self.window()):
+                    return
+
+            import hou
+            pane = self._pane_tab_under_cursor(hou)
+            handled = False
+
+            if pane and pane.type() == hou.paneTabType.NetworkEditor:
+                network_node = pane.pwd()
+                try:
+                    pos = pane.cursorPosition()
+                except Exception:
+                    try:
+                        pos = pane.visibleBounds().center()
+                    except Exception:
+                        pos = hou.Vector2(0, 0)
+
+                if hasattr(item, 'is_simple_file') and item.is_simple_file:
+                    # For textures: check if dropped ON a node
+                    dropped_node = self._find_node_at_pos(network_node, pos)
+                    if dropped_node:
+                        # Try to set any file-type parameter on the node
+                        if self._set_file_parm_on_node(dropped_node, item.path, getattr(item, "texture_type", None)):
+                            handled = True
+                        else:
+                            # No file parm found, create an image node
+                            from .octane_builder import build_material_from_texture_drop
+                            self._defer_drop_action(
+                                lambda: build_material_from_texture_drop(network_node, pos, item.path)
+                            )
+                            handled = True
+                    else:
+                        selected_nodes = hou.selectedNodes()
+                        if selected_nodes:
+                            handled = self._set_file_parm_on_node(
+                                selected_nodes[0],
+                                item.path,
+                                getattr(item, "texture_type", None),
+                            )
+                        if not handled:
+                            # Dropped on empty space, create node
+                            from .octane_builder import build_material_from_texture_drop
+                            self._defer_drop_action(
+                                lambda: build_material_from_texture_drop(network_node, pos, item.path)
+                            )
+                            handled = True
+                else:
+                    from .octane_builder import build_material
+                    material_data = item.data.to_dict()
+                    self._defer_drop_action(
+                        lambda: build_material(network_node, pos, material_data)
+                    )
+                    handled = True
+
+            if hasattr(item, "is_simple_file") and item.is_simple_file and not handled:
+                handled = self._set_file_parm_in_parameter_pane(
+                    pane,
+                    item.path,
+                    getattr(item, "texture_type", None),
+                )
+
+            if hasattr(item, "is_simple_file") and item.is_simple_file and not handled:
+                selected_nodes = hou.selectedNodes()
+                if selected_nodes:
+                    self._set_file_parm_on_node(
+                        selected_nodes[0],
+                        item.path,
+                        getattr(item, "texture_type", None),
+                    )
+        except Exception as e:
+            print("[MaterialGallery] Drop error:", e)
+            traceback.print_exc()
+
+    def focusOutEvent(self, event):
+        if self._dragging_item is not None:
+            self._clear_drag_state()
+        super().focusOutEvent(event)
+
+    def hideEvent(self, event):
+        if self._dragging_item is not None:
+            self._clear_drag_state()
+        super().hideEvent(event)
 
     @staticmethod
     def _find_node_at_pos(parent_node, pos):
@@ -169,6 +223,20 @@ class MaterialListView(QtWidgets.QListView):
         return None
 
     @staticmethod
+    def _infer_texture_type_from_path(filepath, default_type="unknown"):
+        extension = os.path.splitext(filepath or "")[1].lower()
+        if extension in (".hdr", ".hdri"):
+            return "hdri"
+
+        inferred_type = classify_texture_type(os.path.basename(filepath or ""))
+        if inferred_type == "unknown":
+            if extension == ".exr":
+                # EXR files from the HDRI tab should be treated as environment maps.
+                return default_type
+            return default_type
+        return inferred_type
+
+    @staticmethod
     def _is_file_reference_parm(parm):
         try:
             import hou
@@ -178,38 +246,26 @@ class MaterialListView(QtWidgets.QListView):
             if template.stringType() == hou.stringParmType.FileReference:
                 return True
 
-            text = "{0} {1}".format(parm.name(), template.label()).lower()
-            if any(token in text for token in ("file", "filename", "path", "texture", "tex", "map", "image", "env")):
+            tags = template.tags() or {}
+            tag_keys = " ".join(tags.keys()).lower()
+            tag_vals = " ".join(str(v) for v in tags.values()).lower()
+            if "filechooser" in tag_keys or "filechooser" in tag_vals:
+                return True
+            if "chooser_mode" in tag_keys and "read" in tag_vals:
                 return True
             return False
         except Exception:
             return False
-
-    @staticmethod
-    def _score_file_parm(parm, texture_type):
-        try:
-            template = parm.parmTemplate()
-            text = "{0} {1}".format(parm.name(), template.label()).lower()
-        except Exception:
-            text = parm.name().lower()
-
-        score = 0
-        if "file" in text or "filename" in text or "path" in text:
-            score += 3
-        if any(token in text for token in ("map", "texture", "image", "tex")):
-            score += 2
-        if texture_type and texture_type != "unknown":
-            if texture_type in text:
-                score += 6
-        return score
 
     @classmethod
     def _set_file_parm_on_node(cls, node, filepath, texture_type=None, preferred_parms=None):
         """Try to set a file-type parameter on the node. Returns True if successful."""
         # Common file parameter names across Houdini nodes
         file_parm_names = ("File", "A_FILENAME", "filename", "textureFile", "file", 
-                           "fileName", "tex0", "env_map", "ar_light_color_texture",
-                           "A_FILENAME", "vm_background", "map", "texture")
+                           "fileName", "tex0", "map", "texture", "image", "path",
+                           "env_map", "vm_background", "environment_map", "hdri_map",
+                           "gobo", "gobo_map", "cookie", "cookie_map", "projection_map",
+                           "light_texture", "ar_light_color_texture", "A_FILENAME")
         for parm_name in file_parm_names:
             parm = node.parm(parm_name)
             if parm is not None:
@@ -220,7 +276,6 @@ class MaterialListView(QtWidgets.QListView):
                     pass
 
         if preferred_parms:
-            ranked_parms = []
             for parm in preferred_parms:
                 if parm is None:
                     continue
@@ -233,31 +288,33 @@ class MaterialListView(QtWidgets.QListView):
                     if candidate is None:
                         continue
                     if cls._is_file_reference_parm(candidate):
-                        ranked_parms.append((cls._score_file_parm(candidate, texture_type), candidate))
-            for _, parm in sorted(ranked_parms, key=lambda item: item[0], reverse=True):
+                        try:
+                            candidate.set(filepath)
+                            return True
+                        except Exception:
+                            continue
+
+        # Fallback: search all string parms that are file references.
+        for parm in node.parms():
+            if cls._is_file_reference_parm(parm):
                 try:
                     parm.set(filepath)
                     return True
                 except Exception:
                     continue
-
-        # Fallback: search all string parms that are file references.
-        ranked_parms = []
-        for parm in node.parms():
-            if cls._is_file_reference_parm(parm):
-                ranked_parms.append((cls._score_file_parm(parm, texture_type), parm))
-
-        for _, parm in sorted(ranked_parms, key=lambda item: item[0], reverse=True):
-            try:
-                parm.set(filepath)
-                return True
-            except Exception:
-                continue
         return False
 
     @staticmethod
-    def _set_text_on_widget_under_cursor(filepath):
+    def _set_text_on_widget_under_cursor(filepath, excluded_root=None):
         widget = QtWidgets.QApplication.widgetAt(QtGui.QCursor.pos())
+        if widget is None:
+            return False
+        if excluded_root is not None:
+            try:
+                if widget is excluded_root or excluded_root.isAncestorOf(widget):
+                    return False
+            except Exception:
+                pass
         visited = set()
 
         while widget is not None and id(widget) not in visited:
@@ -267,6 +324,12 @@ class MaterialListView(QtWidgets.QListView):
                     widget.setText(filepath)
                     widget.returnPressed.emit()
                     widget.editingFinished.emit()
+                    return True
+                except Exception:
+                    pass
+            elif isinstance(widget, QtWidgets.QComboBox) and widget.isEditable():
+                try:
+                    widget.setEditText(filepath)
                     return True
                 except Exception:
                     pass
@@ -337,7 +400,7 @@ class ThumbnailCacheWorker(QtCore.QThread):
                 break
             if ".thumbnails" in dirs:
                 dirs.remove(".thumbnails")
-            if not any(f.lower().endswith((".png", ".jpg", ".jpeg", ".exr", ".tif", ".tiff", ".tga")) for f in files):
+            if not any(f.lower().endswith((".png", ".jpg", ".jpeg", ".exr", ".hdr", ".hdri", ".tif", ".tiff", ".tga")) for f in files):
                 continue
 
             mat = Material(root)
@@ -406,7 +469,7 @@ class MaterialGalleryWindow(QtWidgets.QWidget):
         
         # Asset Type Dropdown
         self.type_combo = QtWidgets.QComboBox()
-        self.type_combo.addItems(["Materials", "Textures"])
+        self.type_combo.addItems(["Materials", "Textures", "HDRIs"])
         self.type_combo.setFixedHeight(30)
         self.type_combo.setMinimumWidth(140)
         self.type_combo.currentIndexChanged.connect(self.on_type_changed)
@@ -581,7 +644,7 @@ class MaterialGalleryWindow(QtWidgets.QWidget):
         self.refresh_view()
 
     def get_current_asset_type(self):
-        return self.type_combo.currentText()  # "Materials" or "Textures"
+        return self.type_combo.currentText()  # "Materials", "Textures", or "HDRIs"
 
     def refresh_view(self):
         if not self.current_library:
@@ -601,6 +664,9 @@ class MaterialGalleryWindow(QtWidgets.QWidget):
             elif asset_type == "Textures":
                 self.current_folder = os.path.join(self.current_library, "textures")
                 self.populate_textures()
+            elif asset_type == "HDRIs":
+                self.current_folder = os.path.join(self.current_library, "hdris")
+                self.populate_hdris()
 
     def populate_materials(self):
         mat_dir = os.path.join(self.current_library, "materials")
@@ -621,7 +687,7 @@ class MaterialGalleryWindow(QtWidgets.QWidget):
             dd = type('DummyData', (), {'path': lf, 'name': os.path.basename(lf), 'thumbnail': lf})()
             m_item = MaterialItem(dd, is_folder=False)
             m_item.is_simple_file = True
-            m_item.texture_type = classify_texture_type(os.path.basename(lf))
+            m_item.texture_type = MaterialListView._infer_texture_type_from_path(lf, default_type="texture")
             items.append(m_item)
                  
         self.model.update_items(items)
@@ -630,9 +696,7 @@ class MaterialGalleryWindow(QtWidgets.QWidget):
         textures = self.library_manager.get_gsg_textures(self.current_library)
         items = []
         for tex in textures:
-            inferred_type = classify_texture_type(os.path.basename(tex.texture_path or ""))
-            if inferred_type == "unknown":
-                inferred_type = "texture"
+            inferred_type = MaterialListView._infer_texture_type_from_path(tex.texture_path, default_type="texture")
             # Use the preview as thumbnail, texture_path for drag/drop
             dd = type('DummyData', (), {
                 'path': tex.texture_path, 
@@ -642,6 +706,21 @@ class MaterialGalleryWindow(QtWidgets.QWidget):
             m_item = MaterialItem(dd, is_folder=False)
             m_item.is_simple_file = True
             m_item.texture_type = inferred_type
+            items.append(m_item)
+        self.model.update_items(items)
+
+    def populate_hdris(self):
+        hdris = self.library_manager.get_gsg_hdris(self.current_library)
+        items = []
+        for hdri in hdris:
+            dd = type('DummyData', (), {
+                'path': hdri.hdri_path,
+                'name': hdri.name,
+                'thumbnail': hdri.thumbnail or hdri.hdri_path
+            })()
+            m_item = MaterialItem(dd, is_folder=False)
+            m_item.is_simple_file = True
+            m_item.texture_type = "hdri"
             items.append(m_item)
         self.model.update_items(items)
 
@@ -697,7 +776,14 @@ class MaterialGalleryWindow(QtWidgets.QWidget):
         open_action = menu.addAction("Open in Explorer")
         open_action.triggered.connect(lambda: self.open_in_explorer(item.path))
         
-        copy_action = menu.addAction("Copy Path")
+        if getattr(item, "is_simple_file", False):
+            copy_label = "Copy File Path"
+        elif item.is_folder:
+            copy_label = "Copy Folder Path"
+        else:
+            copy_label = "Copy Material Path"
+
+        copy_action = menu.addAction(copy_label)
         copy_action.triggered.connect(lambda: QtWidgets.QApplication.clipboard().setText(item.path))
         
         if not item.is_folder:
@@ -933,7 +1019,7 @@ class MaterialGalleryWindow(QtWidgets.QWidget):
             if not selected_nodes:
                 return
             node = selected_nodes[0]
-            inferred_type = classify_texture_type(os.path.basename(texture_path))
+            inferred_type = MaterialListView._infer_texture_type_from_path(texture_path, default_type="texture")
             MaterialListView._set_file_parm_on_node(node, texture_path, inferred_type)
         except Exception as e:
             print("Failed to apply texture to node:", e)

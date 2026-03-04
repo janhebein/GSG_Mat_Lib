@@ -1,10 +1,11 @@
 # GSG Mat Lib
 
-Simple Houdini Python Panel for browsing and dropping **materials** and **textures** into a material network.
+Simple Houdini Python Panel for browsing and dropping **materials**, **textures**, and **HDRIs** into a material network.
 
 ## Includes
 - Materials view
 - Textures view
+- HDRIs view
 - Drag and drop to node file parameters
 - Preview thumbnail caching
 
@@ -18,4 +19,4 @@ Simple Houdini Python Panel for browsing and dropping **materials** and **textur
 
 ## Notes
 - This package is intentionally clean and does not include ODTools content.
-- Supported library tabs right now: `Materials`, `Textures`.
+- Supported library tabs right now: `Materials`, `Textures`, `HDRIs`.
