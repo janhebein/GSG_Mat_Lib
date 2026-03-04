@@ -74,9 +74,53 @@ def _set_linear_gamma(texture_node):
 
 def _set_first_parm_value(node, parm_names, value):
     parm = _first_existing_parm(node, parm_names)
-    if parm is not None:
+    if parm is None:
+        return False
+
+    try:
         parm.set(value)
         return True
+    except TypeError:
+        pass
+    except Exception:
+        return False
+
+    try:
+        parm.set(str(value))
+        return True
+    except TypeError:
+        pass
+    except Exception:
+        return False
+
+    value_str = str(value)
+    try:
+        menu_items = parm.menuItems() or ()
+    except Exception:
+        menu_items = ()
+
+    if menu_items:
+        for menu_item in menu_items:
+            if menu_item == value_str or value_str in menu_item:
+                try:
+                    parm.set(menu_item)
+                    return True
+                except Exception:
+                    continue
+
+        try:
+            menu_labels = parm.menuLabels() or ()
+        except Exception:
+            menu_labels = ()
+
+        for index, label in enumerate(menu_labels):
+            if value_str in str(label) and index < len(menu_items):
+                try:
+                    parm.set(menu_items[index])
+                    return True
+                except Exception:
+                    continue
+
     return False
 
 

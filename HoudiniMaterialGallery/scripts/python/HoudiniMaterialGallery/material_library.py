@@ -119,6 +119,13 @@ TEXTURE_TYPES = {
 
 THUMBNAIL_IDENTIFIERS = ["thumb", "preview", "thumbnail", "sphere"]
 VALID_EXTENSIONS = [".png", ".jpg", ".jpeg", ".exr", ".tif", ".tiff", ".tga"]
+IGNORED_SIDECAREXTENSIONS = {".rat"}
+
+
+def _is_ignored_sidecar_file(filename):
+    filename_lower = filename.lower()
+    ext = os.path.splitext(filename_lower)[1]
+    return ext in IGNORED_SIDECAREXTENSIONS or ".rat." in filename_lower
 
 
 def classify_texture_type(filename):
@@ -150,7 +157,9 @@ class Material:
             filepath = os.path.join(self.path, filename)
             if not os.path.isfile(filepath):
                 continue
-            
+            if _is_ignored_sidecar_file(filename):
+                continue
+             
             ext = os.path.splitext(filename)[1].lower()
             if ext not in VALID_EXTENSIONS:
                 continue
@@ -280,6 +289,8 @@ class MaterialLibraryManager:
                         materials.extend(rec_mats)
                         loose_files.extend(rec_loose)
             elif os.path.isfile(item_path):
+                if _is_ignored_sidecar_file(item):
+                    continue
                 ext = os.path.splitext(item)[1].lower()
                 if ext in VALID_EXTENSIONS:
                     loose_files.append(item_path)
@@ -299,6 +310,8 @@ class MaterialLibraryManager:
                 if recursive:
                     textures.extend(self.get_all_textures(item_path, recursive=True))
             elif os.path.isfile(item_path):
+                if _is_ignored_sidecar_file(item):
+                    continue
                 ext = os.path.splitext(item)[1].lower()
                 if ext in VALID_EXTENSIONS:
                     textures.append(item_path)
@@ -393,6 +406,8 @@ class HDRIAsset:
         for f in os.listdir(self.path):
             fp = os.path.join(self.path, f)
             if not os.path.isfile(fp):
+                continue
+            if _is_ignored_sidecar_file(f):
                 continue
             fl = f.lower()
             ext = os.path.splitext(fl)[1]
