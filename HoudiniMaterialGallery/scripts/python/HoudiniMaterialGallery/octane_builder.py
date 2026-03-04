@@ -72,6 +72,25 @@ def _set_linear_gamma(texture_node):
         gamma_parm.set(1.0)
 
 
+def _set_first_parm_value(node, parm_names, value):
+    parm = _first_existing_parm(node, parm_names)
+    if parm is not None:
+        parm.set(value)
+        return True
+    return False
+
+
+def _create_2d_transform_node(vopnet):
+    import hou
+
+    for node_type in ("octane::NT_TRANSFORM_2D", "NT_TRANSFORM_2D", "octane_transform_2d"):
+        try:
+            return vopnet.createNode(node_type, "2D_transformation1")
+        except hou.OperationFailed:
+            continue
+    return None
+
+
 def _snapshot_sibling_positions(parent_node):
     snapshot = {}
     try:
@@ -280,12 +299,17 @@ def build_material(parent_node, position, material_data):
                 displacement_node = vopnet.createNode("octane::NT_DISPLACEMENT", "Displacement1")
             except hou.OperationFailed:
                 displacement_node = vopnet.createNode("octane_displacement", "Displacement1")
-                
+                 
             displacement_node.setPosition(hou.Vector2(1.5, -4))
             _connect_input_by_name(standard_surface, "displacement", displacement_node)
+            _set_first_parm_value(displacement_node, ("levelOfDetail", "levelofdetail"), 4096)
+            _set_first_parm_value(displacement_node, ("black_level", "midLevel", "mid_level"), 0.5)
 
         y_offset = 4.0
         x_offset = -4.0
+        transform_2d_node = _create_2d_transform_node(vopnet) if maps else None
+        if transform_2d_node is not None:
+            transform_2d_node.setPosition(hou.Vector2(x_offset - 2.5, 0))
 
         for map_key, texture_path in maps.items():
             map_config = MAP_TYPES_TO_INPUTS.get(map_key)
@@ -300,8 +324,10 @@ def build_material(parent_node, position, material_data):
                 
                 try: texture_node.setName(nice_name, unique_name=True)
                 except: pass
-                
+                 
                 _set_texture_file_parm(texture_node, texture_path)
+                if transform_2d_node is not None:
+                    _connect_input_by_name(texture_node, "transform", transform_2d_node)
                 texture_node.setPosition(hou.Vector2(x_offset, y_offset))
                 y_offset -= 2.5
                 continue
@@ -329,6 +355,8 @@ def build_material(parent_node, position, material_data):
             _set_texture_file_parm(texture_node, texture_path)
             if not use_srgb:
                 _set_linear_gamma(texture_node)
+            if transform_2d_node is not None:
+                _connect_input_by_name(texture_node, "transform", transform_2d_node)
 
             texture_node.setPosition(hou.Vector2(x_offset, y_offset))
             y_offset -= 2.5

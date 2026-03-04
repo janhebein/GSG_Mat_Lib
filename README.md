@@ -12,6 +12,8 @@ Simple Houdini Python Panel for browsing and dropping **materials**, **textures*
 - Drag and drop textures/HDRIs to node file parameters
 - Right-click `Copy File Path` / `Copy Material Path`
 - Preview thumbnail caching
+- Octane material builder adds a shared `2D Transform` node and connects it to texture image nodes
+- Octane texture displacement defaults: `Level of detail` = `4096x4096`, `Mid level` = `0.5`
 
 ## Install (quick)
 1. Copy this `HoudiniMaterialGallery` folder to your machine.
