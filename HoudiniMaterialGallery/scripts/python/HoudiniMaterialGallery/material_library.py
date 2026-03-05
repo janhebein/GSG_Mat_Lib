@@ -169,6 +169,21 @@ def _load_material_metadata(material_folder):
     return {}
 
 
+def _has_material_metadata_payload(metadata):
+    if not isinstance(metadata, dict):
+        return False
+
+    if str(metadata.get("type", "")).lower() == "material":
+        return True
+
+    params = metadata.get("params")
+    if not isinstance(params, dict):
+        return False
+
+    standard_surface = params.get("standard_surface")
+    return isinstance(standard_surface, dict) and bool(standard_surface)
+
+
 class Material:
     def __init__(self, path):
         self.path = os.path.normpath(path)
@@ -229,8 +244,8 @@ class Material:
         self.metadata = _load_material_metadata(self.path)
                     
     def represents_valid_material(self):
-        """Returns True if this folder contains at least one valid texture map."""
-        return len(self.maps) > 0
+        """Returns True if this folder contains maps or metadata describing a material."""
+        return len(self.maps) > 0 or _has_material_metadata_payload(self.metadata)
 
     def to_dict(self):
         return {

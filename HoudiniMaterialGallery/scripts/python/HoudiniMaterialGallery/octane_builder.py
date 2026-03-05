@@ -36,16 +36,21 @@ MAP_TYPES_TO_INPUTS = {
 }
 
 GSG_STANDARD_SURFACE_PARM_ALIASES = {
-    "coat": ("coat",),
-    "coat_IOR": ("coatIOR", "coatIor", "coat_ior"),
-    "coat_roughness": ("coatRoughness", "coat_roughness"),
+    "base_color": ("baseColor", "base_color"),
+    "coat": ("coating", "coat", "coatWeight", "coatingWeight"),
+    "coat_color": ("coatingColor", "coatColor", "coat_color"),
+    "coat_IOR": ("coatingIor", "coatIOR", "coatIor", "coat_ior"),
+    "coat_roughness": ("coatingRoughness", "coatRoughness", "coat_roughness"),
+    "dielectric_priority": ("dielectricPriority", "dielectric_priority"),
     "diffuse_roughness": ("diffuseRoughness", "diffuse_roughness"),
+    "internal_reflections": ("internalReflections", "internal_reflections"),
     "sheen": ("sheen",),
     "sheen_color": ("sheenColor", "sheen_color"),
     "sheen_roughness": ("sheenRoughness", "sheen_roughness"),
     "specular": ("specular",),
-    "specular_IOR": ("specularIOR", "specularIor", "specular_ior"),
+    "specular_IOR": ("ior", "specularIOR", "specularIor", "specular_ior"),
     "specular_anisotropy": ("specularAnisotropy", "specular_anisotropy", "anisotropy"),
+    "specular_roughness": ("roughness", "specularRoughness", "specular_roughness"),
     "specular_color": ("specularColor", "specular_color"),
     "specular_rotation": ("specularRotation", "specular_rotation", "anisotropyRotation"),
     "subsurface": ("subsurface",),
@@ -53,8 +58,12 @@ GSG_STANDARD_SURFACE_PARM_ALIASES = {
     "subsurface_radius": ("subsurfaceRadius", "subsurface_radius"),
     "subsurface_scale": ("subsurfaceScale", "subsurface_scale"),
     "subsurface_type": ("subsurfaceType", "subsurface_type"),
-    "thin_walled": ("thinWalled", "thin_walled"),
+    "thin_walled": ("thinWall", "thinWalled", "thin_walled"),
+    "transmission": ("transmission",),
+    "transmission_color": ("transmissionColor", "transmission_color"),
     "transmission_depth": ("transmissionDepth", "transmission_depth"),
+    "transmission_scatter": ("transmissionScatter", "transmission_scatter", "scatterColor", "subsurfaceColor"),
+    "caustics": ("caustics",),
 }
 
 GSG_NORMAL_MAP_PARM_ALIASES = {
@@ -174,15 +183,17 @@ def _set_first_parm_value(node, parm_names, value):
 
 
 def _set_rgb_like_value(node, parm_names, value):
-    if not isinstance(value, dict):
-        return False
-
     try:
-        rgb = (
-            float(value.get("r", 0.0)),
-            float(value.get("g", 0.0)),
-            float(value.get("b", 0.0)),
-        )
+        if isinstance(value, dict):
+            rgb = (
+                float(value.get("r", 0.0)),
+                float(value.get("g", 0.0)),
+                float(value.get("b", 0.0)),
+            )
+        elif isinstance(value, (tuple, list)) and len(value) >= 3:
+            rgb = (float(value[0]), float(value[1]), float(value[2]))
+        else:
+            return False
     except Exception:
         return False
 
@@ -223,10 +234,13 @@ def _apply_standard_surface_metadata(standard_surface_node, metadata):
         return
 
     rgb_like_metadata_keys = {
+        "base_color",
         "subsurface_radius",
         "subsurface_color",
         "sheen_color",
         "specular_color",
+        "transmission_color",
+        "transmission_scatter",
     }
 
     for metadata_key, value in metadata.items():
