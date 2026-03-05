@@ -482,6 +482,15 @@ class MaterialGalleryWindow(QtWidgets.QWidget):
         self.search_bar.setFixedHeight(30)
         self.search_bar.textChanged.connect(self.on_search_changed)
         header_layout.addWidget(self.search_bar)
+
+        self.btn_refresh = QtWidgets.QPushButton()
+        self.btn_refresh.setObjectName("btn_refresh")
+        self.btn_refresh.setFixedSize(30, 30)
+        self.btn_refresh.setToolTip("Refresh Gallery")
+        self.btn_refresh.setIcon(self.style().standardIcon(QtWidgets.QStyle.SP_BrowserReload))
+        self.btn_refresh.setIconSize(QtCore.QSize(14, 14))
+        self.btn_refresh.clicked.connect(self.on_refresh_clicked)
+        header_layout.addWidget(self.btn_refresh)
         
         header_layout.addStretch()
         
@@ -648,6 +657,9 @@ class MaterialGalleryWindow(QtWidgets.QWidget):
 
     def get_current_asset_type(self):
         return self.type_combo.currentText()  # "Materials", "Textures", or "HDRIs"
+
+    def on_refresh_clicked(self):
+        self.refresh_view()
 
     def _materials_root_folder(self):
         if not self.current_library:

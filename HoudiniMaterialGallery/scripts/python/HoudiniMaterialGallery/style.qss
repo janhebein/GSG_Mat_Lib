@@ -207,3 +207,14 @@ QPushButton#btn_settings:hover {
     background-color: #404040;
     border: 1px solid #555555;
 }
+
+QPushButton#btn_refresh {
+    background-color: #2a2a2a;
+    border: 1px solid #3d3d3d;
+    border-radius: 15px;
+    padding: 0px;
+}
+QPushButton#btn_refresh:hover {
+    background-color: #3a3a3a;
+    border: 1px solid #555555;
+}
