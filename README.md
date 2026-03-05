@@ -1,4 +1,4 @@
-# GSG Mat Lib
+﻿# GSG Mat Lib
 
 Simple Houdini Python Panel for browsing and dropping **materials**, **textures**, and **HDRIs** into a material network.
 
@@ -8,10 +8,13 @@ Simple Houdini Python Panel for browsing and dropping **materials**, **textures*
 - Materials view
 - Textures view
 - HDRIs view
-- Drag and drop materials
-- Drag and drop textures/HDRIs to node file parameters
+- Drag and drop materials into supported networks
+- Drag and drop textures/HDRIs directly onto compatible file parameters
 - Right-click `Copy File Path` / `Copy Material Path`
 - Preview thumbnail caching
+- On-demand thumbnail cache generation for heavy image formats
+- More reliable drag release handling when dropping outside panel bounds
+- Improved material detail thumbnails (per-map preview correctness)
 - Octane material builder adds a shared `2D Transform` node and connects it to texture image nodes
 - Octane texture displacement defaults: `Level of detail` = `4096x4096`, `Mid level` = `0.5`
 
@@ -24,6 +27,6 @@ Simple Houdini Python Panel for browsing and dropping **materials**, **textures*
 5. Open the Python Panel: `GSG Mat Lib`.
 
 ## Notes
-- Supported library tabs right now: `Materials`, `Textures`, `HDRIs`.
-- Supports only **Greyscale Gorilla** materials, textures, and HDRIs.
-- Huge thanks to [oakztream](https://github.com/oakztream) for helping and contributing, especially with mapping data and insights that improved the Octane node mapping.
+- Supported library tabs: `Materials`, `Textures`, `HDRIs`.
+- Supports **Greyscale Gorilla** materials, textures, and HDRIs.
+- Special thanks to your friend for helping with this release.

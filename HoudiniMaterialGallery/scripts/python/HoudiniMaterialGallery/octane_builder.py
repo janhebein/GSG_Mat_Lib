@@ -35,6 +35,32 @@ MAP_TYPES_TO_INPUTS = {
     "sheenopacity": (OCTANE_STANDARD_SURFACE_INPUTS["sheen_roughness"], OCTANE_NODE_TYPES["tex_float_image"], False),
 }
 
+GSG_STANDARD_SURFACE_PARM_ALIASES = {
+    "coat": ("coat",),
+    "coat_IOR": ("coatIOR", "coatIor", "coat_ior"),
+    "coat_roughness": ("coatRoughness", "coat_roughness"),
+    "diffuse_roughness": ("diffuseRoughness", "diffuse_roughness"),
+    "sheen": ("sheen",),
+    "sheen_color": ("sheenColor", "sheen_color"),
+    "sheen_roughness": ("sheenRoughness", "sheen_roughness"),
+    "specular": ("specular",),
+    "specular_IOR": ("specularIOR", "specularIor", "specular_ior"),
+    "specular_anisotropy": ("specularAnisotropy", "specular_anisotropy", "anisotropy"),
+    "specular_color": ("specularColor", "specular_color"),
+    "specular_rotation": ("specularRotation", "specular_rotation", "anisotropyRotation"),
+    "subsurface": ("subsurface",),
+    "subsurface_color": ("subsurfaceColor", "subsurface_color"),
+    "subsurface_radius": ("subsurfaceRadius", "subsurface_radius"),
+    "subsurface_scale": ("subsurfaceScale", "subsurface_scale"),
+    "subsurface_type": ("subsurfaceType", "subsurface_type"),
+    "thin_walled": ("thinWalled", "thin_walled"),
+    "transmission_depth": ("transmissionDepth", "transmission_depth"),
+}
+
+GSG_NORMAL_MAP_PARM_ALIASES = {
+    "strength": ("power", "strength", "normalStrength", "normal_strength"),
+}
+
 
 def _safe_status(message):
     import hou
@@ -145,6 +171,110 @@ def _set_first_parm_value(node, parm_names, value):
                     continue
 
     return False
+
+
+def _set_rgb_like_value(node, parm_names, value):
+    if not isinstance(value, dict):
+        return False
+
+    try:
+        rgb = (
+            float(value.get("r", 0.0)),
+            float(value.get("g", 0.0)),
+            float(value.get("b", 0.0)),
+        )
+    except Exception:
+        return False
+
+    for parm_name in parm_names:
+        try:
+            parm_tuple = node.parmTuple(parm_name)
+            if parm_tuple is not None and len(parm_tuple) >= 3:
+                parm_tuple.set(rgb[: len(parm_tuple)])
+                return True
+        except Exception:
+            pass
+
+        for suffixes in (("r", "g", "b"), ("R", "G", "B"), ("_r", "_g", "_b")):
+            channels = [node.parm("{0}{1}".format(parm_name, suffix)) for suffix in suffixes]
+            if all(channel is not None for channel in channels):
+                try:
+                    channels[0].set(rgb[0])
+                    channels[1].set(rgb[1])
+                    channels[2].set(rgb[2])
+                    return True
+                except Exception:
+                    continue
+    return False
+
+
+def _set_uniform_rgb_like_value(node, parm_names, scalar_value):
+    try:
+        v = float(scalar_value)
+    except Exception:
+        return False
+
+    rgb = {"r": v, "g": v, "b": v}
+    return _set_rgb_like_value(node, parm_names, rgb)
+
+
+def _apply_standard_surface_metadata(standard_surface_node, metadata):
+    if not isinstance(metadata, dict):
+        return
+
+    rgb_like_metadata_keys = {
+        "subsurface_radius",
+        "subsurface_color",
+        "sheen_color",
+        "specular_color",
+    }
+
+    for metadata_key, value in metadata.items():
+        parm_names = GSG_STANDARD_SURFACE_PARM_ALIASES.get(metadata_key)
+        if not parm_names:
+            continue
+
+        if _set_rgb_like_value(standard_surface_node, parm_names, value):
+            continue
+        if metadata_key in rgb_like_metadata_keys and _set_uniform_rgb_like_value(
+            standard_surface_node, parm_names, value
+        ):
+            continue
+
+        if isinstance(value, bool):
+            value = int(value)
+        _set_first_parm_value(standard_surface_node, parm_names, value)
+
+
+def _apply_normal_map_metadata(normal_texture_node, metadata):
+    if normal_texture_node is None or not isinstance(metadata, dict):
+        return
+
+    for metadata_key, value in metadata.items():
+        parm_names = GSG_NORMAL_MAP_PARM_ALIASES.get(metadata_key)
+        if not parm_names:
+            continue
+        _set_first_parm_value(normal_texture_node, parm_names, value)
+
+
+def _apply_gsg_metadata(standard_surface_node, map_nodes, metadata):
+    if not isinstance(metadata, dict):
+        return
+
+    params = metadata.get("params")
+    if not isinstance(params, dict):
+        return
+
+    _apply_standard_surface_metadata(standard_surface_node, params.get("standard_surface", {}))
+    _apply_normal_map_metadata(map_nodes.get("normal"), params.get("normal_map", {}))
+
+
+def _enforce_required_defaults(standard_surface_node, displacement_node):
+    # Keep base weight consistent regardless of source metadata.
+    _set_first_parm_value(standard_surface_node, ("base", "baseWeight", "base_weight"), 1.0)
+
+    if displacement_node is not None:
+        _set_first_parm_value(displacement_node, OCTANE_DISPLACEMENT_PARMS["level_of_detail"], 4096)
 
 
 def _create_2d_transform_node(vopnet):
@@ -323,6 +453,7 @@ def build_material(parent_node, position, material_data):
     material_name = material_data.get("name", "New_Material")
     material_name = hou.text.alphaNumeric(material_name) or "New_Material"
     maps = material_data.get("maps", {})
+    metadata = material_data.get("metadata", {})
     sibling_positions = _snapshot_sibling_positions(parent_node)
     vopnet = None
 
@@ -375,6 +506,7 @@ def build_material(parent_node, position, material_data):
         y_offset = 4.0
         x_offset = -4.0
         transform_2d_node = _create_2d_transform_node(vopnet) if maps else None
+        map_nodes = {}
         if transform_2d_node is not None:
             transform_2d_node.setPosition(hou.Vector2(x_offset - 2.5, 0))
 
@@ -396,6 +528,7 @@ def build_material(parent_node, position, material_data):
                 if transform_2d_node is not None:
                     _connect_input_by_name(texture_node, OCTANE_TEXTURE_INPUTS["transform"], transform_2d_node)
                 texture_node.setPosition(hou.Vector2(x_offset, y_offset))
+                map_nodes[map_key] = texture_node
                 y_offset -= 2.5
                 continue
 
@@ -427,6 +560,7 @@ def build_material(parent_node, position, material_data):
                 _connect_input_by_name(texture_node, OCTANE_TEXTURE_INPUTS["transform"], transform_2d_node)
 
             texture_node.setPosition(hou.Vector2(x_offset, y_offset))
+            map_nodes[map_key] = texture_node
             y_offset -= 2.5
 
             if map_key == "displacement" and displacement_node is not None:
@@ -434,6 +568,9 @@ def build_material(parent_node, position, material_data):
                 continue
 
             _connect_input_by_name(standard_surface, target_input_name, texture_node)
+
+        _apply_gsg_metadata(standard_surface, map_nodes, metadata)
+        _enforce_required_defaults(standard_surface, displacement_node)
 
         vopnet.layoutChildren()
         vopnet.setSelected(True, clear_all_selected=True)

@@ -140,6 +140,35 @@ def classify_texture_type(filename):
     return "unknown"
 
 
+def _load_material_metadata(material_folder):
+    """Load the first valid .gsgm metadata file found in a material folder."""
+    if not os.path.isdir(material_folder):
+        return {}
+
+    gsgm_files = []
+    try:
+        for filename in os.listdir(material_folder):
+            if filename.lower().endswith(".gsgm"):
+                gsgm_files.append(os.path.join(material_folder, filename))
+    except Exception:
+        return {}
+
+    if not gsgm_files:
+        return {}
+
+    for metadata_path in sorted(gsgm_files):
+        try:
+            with open(metadata_path, "r", encoding="utf-8") as f:
+                data = json.load(f) or {}
+            if isinstance(data, dict):
+                data["_gsgm_path"] = metadata_path
+                return data
+        except Exception:
+            continue
+
+    return {}
+
+
 class Material:
     def __init__(self, path):
         self.path = os.path.normpath(path)
@@ -147,6 +176,7 @@ class Material:
         self.maps = {}
         self.texture_assets = []
         self.thumbnail = None
+        self.metadata = {}
         
         self._scan_directory()
 
@@ -195,6 +225,8 @@ class Material:
                         break
                 if assigned:
                     break
+
+        self.metadata = _load_material_metadata(self.path)
                     
     def represents_valid_material(self):
         """Returns True if this folder contains at least one valid texture map."""
@@ -205,7 +237,8 @@ class Material:
             "name": self.name,
             "path": self.path,
             "thumbnail": self.thumbnail,
-            "maps": self.maps
+            "maps": self.maps,
+            "metadata": self.metadata,
         }
 
 class MaterialLibraryManager:

@@ -438,6 +438,7 @@ class MaterialGalleryWindow(QtWidgets.QWidget):
         self.current_library = None
         self.current_folder = None
         self.in_material_view = False
+        self.material_overview_folder = None
         self.view_mode = "materials"  # "materials" or "textures"
         self._thumb_worker = None
         self._thumb_progress = None
@@ -640,6 +641,8 @@ class MaterialGalleryWindow(QtWidgets.QWidget):
 
     def on_type_changed(self, index):
         self.in_material_view = False
+        self.material_overview_folder = None
+        self.current_folder = None
         self.search_bar.clear()
         self.refresh_view()
 
@@ -659,8 +662,14 @@ class MaterialGalleryWindow(QtWidgets.QWidget):
         else:
             self.breadcrumb_label.setText(f"{asset_type}")
             if asset_type == "Materials":
-                self.current_folder = os.path.join(self.current_library, "materials")
-                self.populate_materials()
+                default_materials_folder = os.path.join(self.current_library, "materials")
+                if (
+                    not self.current_folder
+                    or not os.path.isdir(self.current_folder)
+                    or os.path.normpath(self.current_folder) == os.path.normpath(self.current_library)
+                ):
+                    self.current_folder = default_materials_folder
+                self.populate_materials(self.current_folder)
             elif asset_type == "Textures":
                 self.current_folder = os.path.join(self.current_library, "textures")
                 self.populate_textures()
@@ -668,8 +677,9 @@ class MaterialGalleryWindow(QtWidgets.QWidget):
                 self.current_folder = os.path.join(self.current_library, "hdris")
                 self.populate_hdris()
 
-    def populate_materials(self):
-        mat_dir = os.path.join(self.current_library, "materials")
+    def populate_materials(self, folder_path=None):
+        mat_dir = os.path.normpath(folder_path or os.path.join(self.current_library, "materials"))
+        self.current_folder = mat_dir
         if not os.path.isdir(mat_dir):
             self.model.update_items([])
             return
@@ -748,12 +758,18 @@ class MaterialGalleryWindow(QtWidgets.QWidget):
             return
             
         if item.is_folder:
-            # Not fully supported in the new UI yet if recursive is always on, 
-            # but if it's off, we could dive into subfolders.
-            self.current_library = item.path # Treat subfolder as new root temporarily
+            if self.get_current_asset_type() == "Materials" and not self.in_material_view:
+                self.current_folder = item.path
+                self.search_bar.clear()
+                self.refresh_view()
+                return
+
+            # Fallback behavior for non-material folder items.
+            self.current_library = item.path
             self.refresh_view()
         else:
             # It's a Material, dive into it
+            self.material_overview_folder = self.current_folder
             self.in_material_view = True
             self.current_folder = item.path
             self.search_bar.clear() # Clear search when diving in
@@ -815,8 +831,14 @@ class MaterialGalleryWindow(QtWidgets.QWidget):
                 subprocess.Popen(["xdg-open", os.path.dirname(path)])
 
     def navigate_back(self):
+        overview_folder = self.material_overview_folder or os.path.join(self.current_library, "materials")
+        if not os.path.isdir(overview_folder):
+            overview_folder = os.path.join(self.current_library, "materials")
+
         self.in_material_view = False
-        self.current_folder = self.current_library
+        self.material_overview_folder = None
+        self.current_folder = overview_folder
+        self.search_bar.clear()
         self.refresh_view()
 
     def add_root_folder(self):
