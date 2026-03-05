@@ -36,10 +36,12 @@ MAP_TYPES_TO_INPUTS = {
 }
 
 GSG_STANDARD_SURFACE_PARM_ALIASES = {
+    "base": ("base", "baseWeight", "base_weight"),
     "base_color": ("baseColor", "base_color"),
     "coat": ("coating", "coat", "coatWeight", "coatingWeight"),
     "coat_color": ("coatingColor", "coatColor", "coat_color"),
     "coat_IOR": ("coatingIor", "coatIOR", "coatIor", "coat_ior"),
+    "coat_ior": ("coatingIor", "coatIOR", "coatIor", "coat_ior"),
     "coat_roughness": ("coatingRoughness", "coatRoughness", "coat_roughness"),
     "dielectric_priority": ("dielectricPriority", "dielectric_priority"),
     "diffuse_roughness": ("diffuseRoughness", "diffuse_roughness"),
@@ -49,6 +51,7 @@ GSG_STANDARD_SURFACE_PARM_ALIASES = {
     "sheen_roughness": ("sheenRoughness", "sheen_roughness"),
     "specular": ("specular",),
     "specular_IOR": ("ior", "specularIOR", "specularIor", "specular_ior"),
+    "specular_ior": ("ior", "specularIOR", "specularIor", "specular_ior"),
     "specular_anisotropy": ("specularAnisotropy", "specular_anisotropy", "anisotropy"),
     "specular_roughness": ("roughness", "specularRoughness", "specular_roughness"),
     "specular_color": ("specularColor", "specular_color"),
@@ -62,6 +65,12 @@ GSG_STANDARD_SURFACE_PARM_ALIASES = {
     "transmission": ("transmission",),
     "transmission_color": ("transmissionColor", "transmission_color"),
     "transmission_depth": ("transmissionDepth", "transmission_depth"),
+    "transmission_dispersion": (
+        "transmissionDispersion",
+        "transmission_dispersion",
+        "dispersion",
+        "abbe",
+    ),
     "transmission_scatter": ("transmissionScatter", "transmission_scatter", "scatterColor", "subsurfaceColor"),
     "caustics": ("caustics",),
 }
@@ -283,9 +292,15 @@ def _apply_gsg_metadata(standard_surface_node, map_nodes, metadata):
     _apply_normal_map_metadata(map_nodes.get("normal"), params.get("normal_map", {}))
 
 
-def _enforce_required_defaults(standard_surface_node, displacement_node):
-    # Keep base weight consistent regardless of source metadata.
-    _set_first_parm_value(standard_surface_node, ("base", "baseWeight", "base_weight"), 1.0)
+def _enforce_required_defaults(standard_surface_node, displacement_node, metadata):
+    metadata_params = metadata.get("params") if isinstance(metadata, dict) else None
+    standard_surface_metadata = (
+        metadata_params.get("standard_surface") if isinstance(metadata_params, dict) else None
+    )
+
+    has_base_in_metadata = isinstance(standard_surface_metadata, dict) and "base" in standard_surface_metadata
+    if not has_base_in_metadata:
+        _set_first_parm_value(standard_surface_node, ("base", "baseWeight", "base_weight"), 1.0)
 
     if displacement_node is not None:
         _set_first_parm_value(displacement_node, OCTANE_DISPLACEMENT_PARMS["level_of_detail"], 4096)
@@ -584,7 +599,7 @@ def build_material(parent_node, position, material_data):
             _connect_input_by_name(standard_surface, target_input_name, texture_node)
 
         _apply_gsg_metadata(standard_surface, map_nodes, metadata)
-        _enforce_required_defaults(standard_surface, displacement_node)
+        _enforce_required_defaults(standard_surface, displacement_node, metadata)
 
         vopnet.layoutChildren()
         vopnet.setSelected(True, clear_all_selected=True)

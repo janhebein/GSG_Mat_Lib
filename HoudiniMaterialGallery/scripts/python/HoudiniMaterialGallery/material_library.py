@@ -157,14 +157,15 @@ def _load_material_metadata(material_folder):
         return {}
 
     for metadata_path in sorted(gsgm_files):
-        try:
-            with open(metadata_path, "r", encoding="utf-8") as f:
-                data = json.load(f) or {}
-            if isinstance(data, dict):
-                data["_gsgm_path"] = metadata_path
-                return data
-        except Exception:
-            continue
+        for encoding in ("utf-8", "utf-8-sig", "utf-16", "utf-16-le", "utf-16-be"):
+            try:
+                with open(metadata_path, "r", encoding=encoding) as f:
+                    data = json.load(f) or {}
+                if isinstance(data, dict):
+                    data["_gsgm_path"] = metadata_path
+                    return data
+            except Exception:
+                continue
 
     return {}
 
@@ -172,6 +173,9 @@ def _load_material_metadata(material_folder):
 def _has_material_metadata_payload(metadata):
     if not isinstance(metadata, dict):
         return False
+
+    if metadata.get("_gsgm_path"):
+        return True
 
     if str(metadata.get("type", "")).lower() == "material":
         return True
