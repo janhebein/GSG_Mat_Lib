@@ -156,7 +156,8 @@ def _load_material_metadata(material_folder):
     if not gsgm_files:
         return {}
 
-    for metadata_path in sorted(gsgm_files):
+    sorted_files = sorted(gsgm_files)
+    for metadata_path in sorted_files:
         for encoding in ("utf-8", "utf-8-sig", "utf-16", "utf-16-le", "utf-16-be"):
             try:
                 with open(metadata_path, "r", encoding=encoding) as f:
@@ -167,7 +168,8 @@ def _load_material_metadata(material_folder):
             except Exception:
                 continue
 
-    return {}
+    # Keep materials discoverable even if metadata JSON is malformed.
+    return {"_gsgm_path": sorted_files[0], "_metadata_parse_error": True}
 
 
 def _has_material_metadata_payload(metadata):
@@ -196,6 +198,7 @@ class Material:
         self.texture_assets = []
         self.thumbnail = None
         self.metadata = {}
+        self.has_gsgm_file = False
         
         self._scan_directory()
 
@@ -212,6 +215,9 @@ class Material:
                 continue
              
             ext = os.path.splitext(filename)[1].lower()
+            if ext == ".gsgm":
+                self.has_gsgm_file = True
+                continue
             if ext not in VALID_EXTENSIONS:
                 continue
                 
@@ -249,7 +255,7 @@ class Material:
                     
     def represents_valid_material(self):
         """Returns True if this folder contains maps or metadata describing a material."""
-        return len(self.maps) > 0 or _has_material_metadata_payload(self.metadata)
+        return len(self.maps) > 0 or _has_material_metadata_payload(self.metadata) or self.has_gsgm_file
 
     def to_dict(self):
         return {

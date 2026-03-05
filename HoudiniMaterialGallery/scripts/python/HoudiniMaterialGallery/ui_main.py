@@ -649,18 +649,53 @@ class MaterialGalleryWindow(QtWidgets.QWidget):
     def get_current_asset_type(self):
         return self.type_combo.currentText()  # "Materials", "Textures", or "HDRIs"
 
+    def _materials_root_folder(self):
+        if not self.current_library:
+            return None
+        return os.path.normpath(os.path.join(self.current_library, "materials"))
+
+    def _can_navigate_back(self):
+        if self.in_material_view:
+            return True
+
+        if self.get_current_asset_type() != "Materials" or not self.current_folder:
+            return False
+
+        root_folder = self._materials_root_folder()
+        if not root_folder:
+            return False
+
+        return os.path.normpath(self.current_folder) != os.path.normpath(root_folder)
+
+    def _materials_breadcrumb_text(self):
+        root_folder = self._materials_root_folder()
+        if not root_folder or not self.current_folder:
+            return "Materials"
+
+        current = os.path.normpath(self.current_folder)
+        root = os.path.normpath(root_folder)
+        if current == root:
+            return "Materials"
+
+        try:
+            relative = os.path.relpath(current, root)
+        except Exception:
+            return "Materials"
+
+        if relative in (".", ""):
+            return "Materials"
+        return "Materials > " + relative.replace("\\", " > ")
+
     def refresh_view(self):
         if not self.current_library:
             return
             
         asset_type = self.get_current_asset_type()
-        self.btn_back.setVisible(self.in_material_view)
         
         if self.in_material_view:
-            self.breadcrumb_label.setText(f"{asset_type} > {os.path.basename(self.current_folder)}")
+            self.breadcrumb_label.setText("Materials > " + os.path.basename(self.current_folder or "Material"))
             self.populate_material_maps()
         else:
-            self.breadcrumb_label.setText(f"{asset_type}")
             if asset_type == "Materials":
                 default_materials_folder = os.path.join(self.current_library, "materials")
                 if (
@@ -669,13 +704,18 @@ class MaterialGalleryWindow(QtWidgets.QWidget):
                     or os.path.normpath(self.current_folder) == os.path.normpath(self.current_library)
                 ):
                     self.current_folder = default_materials_folder
+                self.breadcrumb_label.setText(self._materials_breadcrumb_text())
                 self.populate_materials(self.current_folder)
             elif asset_type == "Textures":
+                self.breadcrumb_label.setText("Textures")
                 self.current_folder = os.path.join(self.current_library, "textures")
                 self.populate_textures()
             elif asset_type == "HDRIs":
+                self.breadcrumb_label.setText("HDRIs")
                 self.current_folder = os.path.join(self.current_library, "hdris")
                 self.populate_hdris()
+
+        self.btn_back.setVisible(self._can_navigate_back())
 
     def populate_materials(self, folder_path=None):
         mat_dir = os.path.normpath(folder_path or os.path.join(self.current_library, "materials"))
@@ -831,13 +871,28 @@ class MaterialGalleryWindow(QtWidgets.QWidget):
                 subprocess.Popen(["xdg-open", os.path.dirname(path)])
 
     def navigate_back(self):
-        overview_folder = self.material_overview_folder or os.path.join(self.current_library, "materials")
-        if not os.path.isdir(overview_folder):
-            overview_folder = os.path.join(self.current_library, "materials")
+        if self.in_material_view:
+            overview_folder = self.material_overview_folder or os.path.join(self.current_library, "materials")
+            if not os.path.isdir(overview_folder):
+                overview_folder = os.path.join(self.current_library, "materials")
 
-        self.in_material_view = False
-        self.material_overview_folder = None
-        self.current_folder = overview_folder
+            self.in_material_view = False
+            self.material_overview_folder = None
+            self.current_folder = overview_folder
+        elif self.get_current_asset_type() == "Materials":
+            root_folder = self._materials_root_folder()
+            if root_folder and self.current_folder:
+                current = os.path.normpath(self.current_folder)
+                root = os.path.normpath(root_folder)
+                if current != root:
+                    parent = os.path.normpath(os.path.dirname(current))
+                    try:
+                        if os.path.commonpath([root, parent]) != root:
+                            parent = root
+                    except Exception:
+                        parent = root
+                    self.current_folder = parent
+
         self.search_bar.clear()
         self.refresh_view()
 
