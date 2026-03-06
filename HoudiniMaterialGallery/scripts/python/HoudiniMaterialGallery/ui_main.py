@@ -11,6 +11,20 @@ from .material_library import (
 )
 from .ui_components import MaterialItem, MaterialListModel, MaterialDelegate
 
+
+def _safe_standard_icon(icon_type):
+    """Get a standard Qt icon without relying on a widget-local style object."""
+    try:
+        app = QtWidgets.QApplication.instance()
+        if app is not None:
+            style = app.style()
+            if style is not None:
+                return style.standardIcon(icon_type)
+    except Exception:
+        pass
+    return QtGui.QIcon()
+
+
 class MaterialListView(QtWidgets.QListView):
     """Custom list view that implements drag-to-network-editor by tracking
     mouse press/release and directly calling the Octane builder when the
@@ -487,7 +501,11 @@ class MaterialGalleryWindow(QtWidgets.QWidget):
         self.btn_refresh.setObjectName("btn_refresh")
         self.btn_refresh.setFixedSize(30, 30)
         self.btn_refresh.setToolTip("Refresh Gallery")
-        self.btn_refresh.setIcon(self.style().standardIcon(QtWidgets.QStyle.SP_BrowserReload))
+        refresh_icon = _safe_standard_icon(QtWidgets.QStyle.SP_BrowserReload)
+        if not refresh_icon.isNull():
+            self.btn_refresh.setIcon(refresh_icon)
+        else:
+            self.btn_refresh.setText("R")
         self.btn_refresh.setIconSize(QtCore.QSize(14, 14))
         self.btn_refresh.clicked.connect(self.on_refresh_clicked)
         header_layout.addWidget(self.btn_refresh)
