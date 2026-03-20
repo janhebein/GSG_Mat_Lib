@@ -25,19 +25,64 @@ def _safe_standard_icon(icon_type):
     return QtGui.QIcon()
 
 
+def _preferred_ui_thumbnail(primary_path, fallback_path=None):
+    def _resolve_candidate(path):
+        if not path or not os.path.exists(path):
+            return None
+
+        ext = os.path.splitext(path)[1].lower()
+        if ext in (".jpg", ".jpeg", ".png"):
+            return path
+
+        cached_path = get_cached_thumb_path(path)
+        if os.path.exists(cached_path):
+            return cached_path
+
+        old_thumb = os.path.join(os.path.dirname(path), ".thumbnails", os.path.basename(path) + ".jpg")
+        if os.path.exists(old_thumb):
+            return old_thumb
+
+        return None
+
+    return _resolve_candidate(primary_path) or _resolve_candidate(fallback_path)
+
+
 class MaterialListView(QtWidgets.QListView):
     """Custom list view that implements drag-to-network-editor by tracking
     mouse press/release and directly calling the Octane builder when the
     mouse is released over a Houdini Network Editor pane."""
-    
+    previewRequested = QtCore.Signal(object, object)
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setDragEnabled(False)  # We handle our own drag
+        self.setMouseTracking(True)
+        self.viewport().setMouseTracking(True)
         self._dragging_item = None
         self._drag_start_pos = None
         self._drag_watchdog = QtCore.QTimer(self)
         self._drag_watchdog.setInterval(120)
         self._drag_watchdog.timeout.connect(self._on_drag_watchdog_tick)
+
+    def _item_at_pos(self, pos):
+        index = self.indexAt(pos)
+        if not index.isValid():
+            return QtCore.QModelIndex(), None
+        return index, index.data(QtCore.Qt.UserRole)
+
+    def _preview_item_at_pos(self, pos):
+        index, item = self._item_at_pos(pos)
+        if item is None:
+            return None
+
+        delegate = self.itemDelegate(index)
+        if delegate is None or not hasattr(delegate, "is_preview_button_hit"):
+            return None
+
+        item_rect = self.visualRect(index)
+        if delegate.is_preview_button_hit(item_rect, item, pos):
+            return item
+        return None
 
     def _clear_drag_state(self):
         self._dragging_item = None
@@ -69,6 +114,11 @@ class MaterialListView(QtWidgets.QListView):
         if self._dragging_item is not None:
             self._clear_drag_state()
         if event.button() == QtCore.Qt.LeftButton:
+            preview_item = self._preview_item_at_pos(event.pos())
+            if preview_item is not None:
+                self.previewRequested.emit(preview_item, self.viewport().mapToGlobal(event.pos()))
+                event.accept()
+                return
             self._drag_start_pos = event.pos()
         super().mousePressEvent(event)
     
@@ -438,6 +488,102 @@ class ThumbnailCacheWorker(QtCore.QThread):
 
         self.finished_stats.emit(success, failed, total, self._cancel_requested)
 
+
+class ThumbnailPreviewDialog(QtWidgets.QDialog):
+    def __init__(self, item, parent=None):
+        super().__init__(parent)
+        self._item = item
+        self._pixmap = None
+
+        self.setWindowTitle(item.name)
+        self.setWindowFlags(QtCore.Qt.Popup | QtCore.Qt.FramelessWindowHint)
+        self.setModal(False)
+        self.setAttribute(QtCore.Qt.WA_DeleteOnClose, True)
+        self.resize(560, 620)
+
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(10)
+
+        self.preview_label = QtWidgets.QLabel()
+        self.preview_label.setAlignment(QtCore.Qt.AlignCenter)
+        self.preview_label.setMinimumSize(320, 320)
+        self.preview_label.setStyleSheet(
+            "background-color: #141414; border: 1px solid #2f2f2f; border-radius: 8px;"
+        )
+        layout.addWidget(self.preview_label, 1)
+
+        self.name_label = QtWidgets.QLabel(item.name)
+        self.name_label.setAlignment(QtCore.Qt.AlignCenter)
+        self.name_label.setWordWrap(True)
+        layout.addWidget(self.name_label)
+
+        self._load_preview_pixmap()
+        self._refresh_preview()
+
+    def _load_preview_pixmap(self):
+        preview_path = getattr(self._item, "preview_popup_source_path", None)
+        if not preview_path or not os.path.exists(preview_path):
+            return
+
+        pixmap = QtGui.QPixmap(preview_path)
+        if not pixmap.isNull():
+            self._pixmap = pixmap
+
+    def _refresh_preview(self):
+        if self._pixmap is None or self._pixmap.isNull():
+            self.preview_label.setText("Preview unavailable")
+            return
+
+        label_rect = self.preview_label.contentsRect()
+        target_size = QtCore.QSize(
+            max(1, label_rect.width() - 24),
+            max(1, label_rect.height() - 24),
+        )
+        scaled = self._pixmap.scaled(
+            target_size,
+            QtCore.Qt.KeepAspectRatio,
+            QtCore.Qt.SmoothTransformation,
+        )
+        self.preview_label.setPixmap(scaled)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._refresh_preview()
+
+    def show_at(self, anchor_pos):
+        self._position_popup(anchor_pos)
+        self.show()
+        self.raise_()
+        self.activateWindow()
+
+    def _position_popup(self, anchor_pos):
+        if anchor_pos is None:
+            anchor_pos = QtGui.QCursor.pos()
+
+        self.adjustSize()
+        popup_size = self.size()
+
+        screen = QtGui.QGuiApplication.screenAt(anchor_pos)
+        if screen is None:
+            screen = QtGui.QGuiApplication.primaryScreen()
+        available = screen.availableGeometry() if screen is not None else QtWidgets.QApplication.desktop().availableGeometry(anchor_pos)
+
+        x = anchor_pos.x()
+        y = anchor_pos.y() - popup_size.height()
+
+        if x + popup_size.width() > available.right():
+            x = available.right() - popup_size.width()
+        if x < available.left():
+            x = available.left()
+
+        if y < available.top():
+            y = min(anchor_pos.y(), available.bottom() - popup_size.height())
+        if y + popup_size.height() > available.bottom():
+            y = available.bottom() - popup_size.height()
+
+        self.move(QtCore.QPoint(x, y))
+
 class MaterialGalleryWindow(QtWidgets.QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -456,6 +602,7 @@ class MaterialGalleryWindow(QtWidgets.QWidget):
         self.view_mode = "materials"  # "materials" or "textures"
         self._thumb_worker = None
         self._thumb_progress = None
+        self._preview_dialog = None
         
         self.setup_ui()
         self.load_root_folders()
@@ -547,6 +694,8 @@ class MaterialGalleryWindow(QtWidgets.QWidget):
         self.list_view = MaterialListView()
         self.list_view.setViewMode(QtWidgets.QListView.IconMode)
         self.list_view.setResizeMode(QtWidgets.QListView.Adjust)
+        self.list_view.setLayoutMode(QtWidgets.QListView.Batched)
+        self.list_view.setBatchSize(32)
         self.list_view.setSpacing(10)
         self.list_view.setUniformItemSizes(True)
         self.list_view.setMovement(QtWidgets.QListView.Static)
@@ -570,7 +719,7 @@ class MaterialGalleryWindow(QtWidgets.QWidget):
         self.proxy_model.setFilterRole(QtCore.Qt.DisplayRole)
         
         self.list_view.setModel(self.proxy_model)
-        
+        self.list_view.previewRequested.connect(self.show_thumbnail_preview)
         self.list_view.doubleClicked.connect(self.on_item_double_clicked)
         
         main_layout.addWidget(self.list_view)
@@ -593,6 +742,7 @@ class MaterialGalleryWindow(QtWidgets.QWidget):
             self.setStyleSheet(stylesheet)
 
     def load_root_folders(self):
+        self.library_manager.clear_caches()
         if self.library_manager.root_folders:
             self.current_library = self.library_manager.root_folders[0]
             self.current_folder = os.path.join(self.current_library, "materials")
@@ -637,6 +787,7 @@ class MaterialGalleryWindow(QtWidgets.QWidget):
             if os.path.exists(new_path) and os.path.isdir(new_path):
                 self.library_manager.root_folders = [new_path]
                 self.library_manager.save_config()
+                self.library_manager.clear_caches()
                 self.load_root_folders()
             else:
                 import hou
@@ -677,6 +828,7 @@ class MaterialGalleryWindow(QtWidgets.QWidget):
         return self.type_combo.currentText()  # "Materials", "Textures", or "HDRIs"
 
     def on_refresh_clicked(self):
+        self.library_manager.clear_caches()
         self.refresh_view()
 
     def _materials_root_folder(self):
@@ -764,7 +916,15 @@ class MaterialGalleryWindow(QtWidgets.QWidget):
             items.insert(0, MaterialItem(sf, is_folder=True))
 
         for lf in loose_files:
-            dd = type('DummyData', (), {'path': lf, 'name': os.path.basename(lf), 'thumbnail': lf})()
+            dd = type(
+                'DummyData',
+                (),
+                {
+                    'path': lf,
+                    'name': os.path.basename(lf),
+                    'thumbnail': _preferred_ui_thumbnail(lf),
+                },
+            )()
             m_item = MaterialItem(dd, is_folder=False)
             m_item.is_simple_file = True
             m_item.texture_type = MaterialListView._infer_texture_type_from_path(lf, default_type="texture")
@@ -806,13 +966,13 @@ class MaterialGalleryWindow(QtWidgets.QWidget):
 
     def populate_material_maps(self):
         """When dived into a material, show its textures as items."""
-        mat = Material(self.current_folder)
+        mat = self.library_manager.get_material(self.current_folder)
         items = []
         for asset in mat.texture_assets:
             dd = type('DummyData', (), {
                 'path': asset.texture_path, 
                 'name': asset.name, 
-                'thumbnail': asset.texture_path or mat.thumbnail
+                'thumbnail': _preferred_ui_thumbnail(asset.texture_path, mat.thumbnail)
             })()
             m_item = MaterialItem(dd, is_folder=False)
             m_item.is_simple_file = True
@@ -820,6 +980,25 @@ class MaterialGalleryWindow(QtWidgets.QWidget):
             items.append(m_item)
                 
         self.model.update_items(items)
+
+    def show_thumbnail_preview(self, item, anchor_pos=None):
+        if item is None or item.is_folder:
+            return
+
+        preview_path = getattr(item, "preview_popup_source_path", None)
+        if not preview_path or not os.path.exists(preview_path):
+            return
+
+        if self._preview_dialog is not None:
+            try:
+                self._preview_dialog.close()
+                self._preview_dialog.deleteLater()
+            except Exception:
+                pass
+
+        self._preview_dialog = ThumbnailPreviewDialog(item, self)
+        self._preview_dialog.destroyed.connect(lambda *_: setattr(self, "_preview_dialog", None))
+        self._preview_dialog.show_at(anchor_pos)
 
     def on_item_double_clicked(self, index):
         item = index.data(QtCore.Qt.UserRole)
@@ -930,11 +1109,13 @@ class MaterialGalleryWindow(QtWidgets.QWidget):
         folder = QtWidgets.QFileDialog.getExistingDirectory(self, "Select Root Material Folder")
         if folder:
             self.library_manager.add_root_folder(folder)
+            self.library_manager.clear_caches()
             self.load_root_folders()
             
     def remove_current_library(self):
         if self.current_library:
             self.library_manager.remove_root_folder(self.current_library)
+            self.library_manager.clear_caches()
             self.load_root_folders()
 
     def generate_thumbnails(self):

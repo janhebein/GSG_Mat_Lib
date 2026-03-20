@@ -1,12 +1,10 @@
 from hutil.Qt import QtWidgets, QtCore, QtGui
 import os
-from .material_library import get_cached_thumb_path, ensure_cached_thumbnail
+from .material_library import get_cached_thumb_path
 
 _PIXMAP_CACHE = {}
 _MAX_PIXMAP_CACHE_ITEMS = 256
-_HEAVY_THUMB_EXTENSIONS = {".exr", ".hdr", ".hdri", ".tif", ".tiff", ".tga"}
-
-
+_SAFE_DIRECT_PREVIEW_EXTENSIONS = {".jpg", ".jpeg", ".png"}
 def _load_scaled_pixmap(path, size):
     norm_path = os.path.normpath(path)
     try:
@@ -38,6 +36,27 @@ def _load_scaled_pixmap(path, size):
         _PIXMAP_CACHE.clear()
     return pixmap
 
+
+def _resolve_display_thumbnail_path(original_path):
+    if not original_path:
+        return None, False
+
+    cached_path = get_cached_thumb_path(original_path)
+    if os.path.exists(cached_path):
+        return cached_path, True
+
+    folder_path = os.path.dirname(original_path)
+    file_name = os.path.basename(original_path)
+    old_thumb = os.path.join(folder_path, ".thumbnails", file_name + ".jpg")
+    if os.path.exists(old_thumb):
+        return old_thumb, True
+
+    ext = os.path.splitext(original_path)[1].lower()
+    if ext in _SAFE_DIRECT_PREVIEW_EXTENSIONS:
+        return original_path, False
+
+    return None, False
+
 class MaterialItem:
     """Wrapper for either a Material object or a Folder string for the List Model."""
     def __init__(self, data, is_folder=False):
@@ -46,38 +65,27 @@ class MaterialItem:
         self.is_simple_file = False
         self.texture_type = None  # e.g. 'albedo', 'normal', etc.
         self.thumbnail_pixmap = None
+        self.thumbnail_pixmap_size = None
+        self.original_thumbnail_path = None
+        self.thumbnail_source_path = None
+        self.preview_popup_source_path = None
         
         # Caching pixmap
         self.is_cached = False
         if not self.is_folder and hasattr(self.data, 'thumbnail') and self.data.thumbnail:
             original_path = self.data.thumbnail
-            cached_path = get_cached_thumb_path(original_path)
-            
-            if os.path.exists(cached_path):
-                load_path = cached_path
-                self.is_cached = True
-            else:
-                # Fallback: also check old .thumbnails subfolder for backwards compat
-                folder_path = os.path.dirname(original_path)
-                file_name = os.path.basename(original_path)
-                old_thumb = os.path.join(folder_path, '.thumbnails', file_name + '.jpg')
-                if os.path.exists(old_thumb):
-                    load_path = old_thumb
-                    self.is_cached = True
-                else:
-                    ext = os.path.splitext(original_path)[1].lower()
-                    if ext in _HEAVY_THUMB_EXTENSIONS:
-                        generated_thumb = ensure_cached_thumbnail(original_path)
-                        if generated_thumb and os.path.exists(generated_thumb):
-                            load_path = generated_thumb
-                            self.is_cached = True
-                        else:
-                            load_path = None
-                    else:
-                        load_path = original_path
-            
+            self.original_thumbnail_path = original_path
+            load_path, is_cached = _resolve_display_thumbnail_path(original_path)
+            self.is_cached = is_cached
+
             if load_path and os.path.exists(load_path):
-                self.thumbnail_pixmap = _load_scaled_pixmap(load_path, 160)
+                self.thumbnail_source_path = load_path
+
+            original_ext = os.path.splitext(original_path)[1].lower()
+            if original_ext in (".jpg", ".jpeg", ".png") and os.path.exists(original_path):
+                self.preview_popup_source_path = original_path
+            else:
+                self.preview_popup_source_path = self.thumbnail_source_path
 
     @property
     def name(self):
@@ -90,6 +98,14 @@ class MaterialItem:
         if self.is_folder:
             return self.data
         return self.data.path
+
+    def get_thumbnail_pixmap(self, size):
+        if not self.thumbnail_source_path:
+            return None
+        if self.thumbnail_pixmap is None or self.thumbnail_pixmap_size != size:
+            self.thumbnail_pixmap = _load_scaled_pixmap(self.thumbnail_source_path, size)
+            self.thumbnail_pixmap_size = size if self.thumbnail_pixmap is not None else None
+        return self.thumbnail_pixmap
 
 
 class MaterialListModel(QtCore.QAbstractListModel):
@@ -131,9 +147,72 @@ class MaterialDelegate(QtWidgets.QStyledItemDelegate):
         self.thumb_size = 160
         self.padding = 10
         self.radius = 8
+        self.preview_button_size = 22
+        self.preview_button_margin = 6
 
     def sizeHint(self, option, index):
         return self.item_size
+
+    def thumbnail_rect(self, item_rect):
+        return QtCore.QRect(
+            item_rect.left() + self.padding,
+            item_rect.top() + self.padding,
+            self.thumb_size,
+            self.thumb_size,
+        )
+
+    def has_preview(self, item):
+        return (
+            item is not None
+            and not item.is_folder
+            and bool(getattr(item, "preview_popup_source_path", None))
+        )
+
+    def preview_button_rect(self, item_rect):
+        thumb_rect = self.thumbnail_rect(item_rect)
+        return QtCore.QRect(
+            thumb_rect.left() + self.preview_button_margin,
+            thumb_rect.top() + self.preview_button_margin,
+            self.preview_button_size,
+            self.preview_button_size,
+        )
+
+    def is_preview_button_hit(self, item_rect, item, pos):
+        if not self.has_preview(item):
+            return False
+        return self.preview_button_rect(item_rect).contains(pos)
+
+    def _draw_preview_button(self, painter, button_rect, is_hover):
+        button_path = QtGui.QPainterPath()
+        button_path.addRoundedRect(QtCore.QRectF(button_rect), 6, 6)
+
+        fill_color = QtGui.QColor(14, 14, 14, 190 if is_hover else 155)
+        border_color = QtGui.QColor(255, 255, 255, 120 if is_hover else 85)
+        icon_color = QtGui.QColor(255, 255, 255, 230 if is_hover else 205)
+
+        painter.fillPath(button_path, fill_color)
+        painter.setPen(QtGui.QPen(border_color, 1))
+        painter.drawPath(button_path)
+
+        painter.setPen(QtGui.QPen(icon_color, 1.6, QtCore.Qt.SolidLine, QtCore.Qt.RoundCap))
+        inset = 6
+        left = button_rect.left() + inset
+        top = button_rect.top() + inset
+        right = button_rect.right() - inset
+        bottom = button_rect.bottom() - inset
+        arm = 4
+
+        painter.drawLine(left, top + arm, left, top)
+        painter.drawLine(left, top, left + arm, top)
+
+        painter.drawLine(right - arm, top, right, top)
+        painter.drawLine(right, top, right, top + arm)
+
+        painter.drawLine(left, bottom - arm, left, bottom)
+        painter.drawLine(left, bottom, left + arm, bottom)
+
+        painter.drawLine(right - arm, bottom, right, bottom)
+        painter.drawLine(right, bottom - arm, right, bottom)
 
     def paint(self, painter, option, index):
         item = index.data(QtCore.Qt.UserRole)
@@ -167,12 +246,7 @@ class MaterialDelegate(QtWidgets.QStyledItemDelegate):
             painter.fillPath(path, bg_color)
 
         # Draw Thumbnail
-        thumb_rect = QtCore.QRect(
-            rect.left() + self.padding,
-            rect.top() + self.padding,
-            self.thumb_size,
-            self.thumb_size
-        )
+        thumb_rect = self.thumbnail_rect(rect)
 
         painter.setPen(QtCore.Qt.NoPen)
         clip_path = QtGui.QPainterPath()
@@ -184,22 +258,22 @@ class MaterialDelegate(QtWidgets.QStyledItemDelegate):
             painter.fillRect(thumb_rect, QtGui.QColor("#404040"))
             painter.setPen(QtGui.QColor("#888888"))
             painter.drawText(thumb_rect, QtCore.Qt.AlignCenter, "FOLDER\n" + item.name)
-        elif item.thumbnail_pixmap and not item.thumbnail_pixmap.isNull():
-            # Draw actual image centered and cropped based on aspect ratio
-            pixmap = item.thumbnail_pixmap
-            # scaled pixmap is already ready to draw
-            pw = pixmap.width()
-            ph = pixmap.height()
-            
-            x_offset = int((self.thumb_size - pw) / 2)
-            y_offset = int((self.thumb_size - ph) / 2)
-            
-            painter.drawPixmap(thumb_rect.left() + x_offset, thumb_rect.top() + y_offset, pixmap)
         else:
-            # No thumbnail
-            painter.fillRect(thumb_rect, QtGui.QColor("#333333"))
-            painter.setPen(QtGui.QColor("#666666"))
-            painter.drawText(thumb_rect, QtCore.Qt.AlignCenter, "NO PREVIEW")
+            pixmap = item.get_thumbnail_pixmap(self.thumb_size)
+            if pixmap and not pixmap.isNull():
+            # Draw actual image centered and cropped based on aspect ratio
+                pw = pixmap.width()
+                ph = pixmap.height()
+
+                x_offset = int((self.thumb_size - pw) / 2)
+                y_offset = int((self.thumb_size - ph) / 2)
+
+                painter.drawPixmap(thumb_rect.left() + x_offset, thumb_rect.top() + y_offset, pixmap)
+            else:
+                # No thumbnail
+                painter.fillRect(thumb_rect, QtGui.QColor("#333333"))
+                painter.setPen(QtGui.QColor("#666666"))
+                painter.drawText(thumb_rect, QtCore.Qt.AlignCenter, "NO PREVIEW")
 
         # Uncached indicator (small orange dot in top-right)
         if not item.is_folder and not getattr(item, 'is_cached', True):
@@ -209,6 +283,13 @@ class MaterialDelegate(QtWidgets.QStyledItemDelegate):
             painter.setPen(QtCore.Qt.NoPen)
             painter.setBrush(QtGui.QColor("#ff8800"))
             painter.drawEllipse(ix, iy, indicator_size, indicator_size)
+
+        if self.has_preview(item):
+            self._draw_preview_button(
+                painter,
+                self.preview_button_rect(rect),
+                bool(is_hover),
+            )
 
         # Discard clip path
         painter.setClipRect(rect)

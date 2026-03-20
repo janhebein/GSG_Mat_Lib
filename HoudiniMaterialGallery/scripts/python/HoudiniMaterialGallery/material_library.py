@@ -5,6 +5,8 @@ import hashlib
 
 DEFAULT_CACHE_DIR = os.path.join(os.path.expanduser("~"), ".houdini", "gsg_thumb_cache")
 DEFAULT_CONFIG_PATH = os.path.join(os.path.expanduser("~"), ".houdini_material_gallery.json")
+_CACHE_DIR_MEMO = None
+_CACHE_DIR_CONFIG_PATH = None
 
 
 def _read_gallery_config(config_path=DEFAULT_CONFIG_PATH):
@@ -25,9 +27,21 @@ def _resolve_cache_dir_from_config(config_path=DEFAULT_CONFIG_PATH):
     return DEFAULT_CACHE_DIR
 
 
+def _set_cache_dir_memo(cache_dir, config_path=DEFAULT_CONFIG_PATH):
+    global _CACHE_DIR_MEMO, _CACHE_DIR_CONFIG_PATH
+    _CACHE_DIR_MEMO = os.path.normpath(cache_dir) if cache_dir else None
+    _CACHE_DIR_CONFIG_PATH = os.path.normpath(config_path)
+
+
 def get_cache_dir():
     """Returns the central thumbnail cache directory. Creates it if needed."""
-    cache_dir = _resolve_cache_dir_from_config()
+    global _CACHE_DIR_MEMO, _CACHE_DIR_CONFIG_PATH
+    config_path = os.path.normpath(DEFAULT_CONFIG_PATH)
+    if _CACHE_DIR_MEMO and _CACHE_DIR_CONFIG_PATH == config_path:
+        cache_dir = _CACHE_DIR_MEMO
+    else:
+        cache_dir = _resolve_cache_dir_from_config(config_path)
+        _set_cache_dir_memo(cache_dir, config_path)
     if not os.path.exists(cache_dir):
         os.makedirs(cache_dir, exist_ok=True)
     return cache_dir
@@ -273,13 +287,35 @@ class MaterialLibraryManager:
         self.config_path = config_path or DEFAULT_CONFIG_PATH
         self.root_folders = []
         self.thumb_cache_dir = None
+        self._material_object_cache = {}
+        self._materials_cache = {}
+        self._textures_cache = {}
+        self._hdris_cache = {}
         self.load_config()
+
+    def clear_caches(self):
+        self._material_object_cache.clear()
+        self._materials_cache.clear()
+        self._textures_cache.clear()
+        self._hdris_cache.clear()
+
+    def get_material(self, material_path):
+        normalized_path = os.path.normpath(material_path)
+        cached_material = self._material_object_cache.get(normalized_path)
+        if cached_material is not None:
+            return cached_material
+
+        material = Material(normalized_path)
+        self._material_object_cache[normalized_path] = material
+        return material
 
     def load_config(self):
         data = _read_gallery_config(self.config_path)
         self.root_folders = data.get("root_folders", [])
         configured_cache_dir = data.get("thumb_cache_dir")
         self.thumb_cache_dir = os.path.normpath(configured_cache_dir) if configured_cache_dir else None
+        _set_cache_dir_memo(self.thumb_cache_dir or DEFAULT_CACHE_DIR, self.config_path)
+        self.clear_caches()
 
     def save_config(self):
         try:
@@ -304,6 +340,8 @@ class MaterialLibraryManager:
         if not folder_path:
             self.thumb_cache_dir = None
             self.save_config()
+            _set_cache_dir_memo(DEFAULT_CACHE_DIR, self.config_path)
+            self.clear_caches()
             return
 
         normalized = os.path.normpath(folder_path)
@@ -314,32 +352,44 @@ class MaterialLibraryManager:
 
         self.thumb_cache_dir = normalized
         self.save_config()
+        _set_cache_dir_memo(self.thumb_cache_dir, self.config_path)
+        self.clear_caches()
 
     def add_root_folder(self, folder_path):
         folder_path = os.path.normpath(folder_path)
         if folder_path not in self.root_folders and os.path.isdir(folder_path):
             self.root_folders.append(folder_path)
             self.save_config()
+            self.clear_caches()
 
     def remove_root_folder(self, folder_path):
         folder_path = os.path.normpath(folder_path)
         if folder_path in self.root_folders:
             self.root_folders.remove(folder_path)
             self.save_config()
+            self.clear_caches()
 
     def get_materials_in_folder(self, folder_path, recursive=False):
         """Scans a folder and returns (materials, subfolders, loose_files)."""
+        normalized_folder = os.path.normpath(folder_path)
+        cache_key = (normalized_folder, bool(recursive))
+        cached_result = self._materials_cache.get(cache_key)
+        if cached_result is not None:
+            return cached_result
+
         materials = []
         subfolders = []
         loose_files = []
         
-        if not os.path.isdir(folder_path):
-            return materials, subfolders, loose_files
+        if not os.path.isdir(normalized_folder):
+            result = (materials, subfolders, loose_files)
+            self._materials_cache[cache_key] = result
+            return result
 
-        for item in os.listdir(folder_path):
-            item_path = os.path.join(folder_path, item)
+        for item in os.listdir(normalized_folder):
+            item_path = os.path.join(normalized_folder, item)
             if os.path.isdir(item_path):
-                mat = Material(item_path)
+                mat = self.get_material(item_path)
                 if mat.represents_valid_material():
                     materials.append(mat)
                 else:
@@ -354,8 +404,14 @@ class MaterialLibraryManager:
                 ext = os.path.splitext(item)[1].lower()
                 if ext in VALID_EXTENSIONS:
                     loose_files.append(item_path)
-                    
-        return materials, subfolders, loose_files
+
+        materials.sort(key=lambda mat: mat.name.lower())
+        subfolders.sort(key=lambda path: os.path.basename(path).lower())
+        loose_files.sort(key=lambda path: os.path.basename(path).lower())
+
+        result = (materials, subfolders, loose_files)
+        self._materials_cache[cache_key] = result
+        return result
 
     def get_all_textures(self, folder_path, recursive=False):
         """Returns a flat list of all texture file paths in the folder."""
@@ -380,9 +436,14 @@ class MaterialLibraryManager:
 
     def get_gsg_textures(self, library_root):
         """Scans the GSG textures/ subfolder. Each subfolder has a main texture + _preview.jpg."""
-        textures_dir = os.path.join(library_root, "textures")
+        textures_dir = os.path.normpath(os.path.join(library_root, "textures"))
+        cached_result = self._textures_cache.get(textures_dir)
+        if cached_result is not None:
+            return cached_result
+
         results = []
         if not os.path.isdir(textures_dir):
+            self._textures_cache[textures_dir] = results
             return results
         for item in sorted(os.listdir(textures_dir)):
             item_path = os.path.join(textures_dir, item)
@@ -390,13 +451,19 @@ class MaterialLibraryManager:
                 asset = TextureAsset(item_path)
                 if asset.texture_path:
                     results.append(asset)
+        self._textures_cache[textures_dir] = results
         return results
 
     def get_gsg_hdris(self, library_root):
         """Scans the GSG hdris/ subfolder. Each subfolder has .exr/.hdr + _preview.jpg."""
-        hdris_dir = os.path.join(library_root, "hdris")
+        hdris_dir = os.path.normpath(os.path.join(library_root, "hdris"))
+        cached_result = self._hdris_cache.get(hdris_dir)
+        if cached_result is not None:
+            return cached_result
+
         results = []
         if not os.path.isdir(hdris_dir):
+            self._hdris_cache[hdris_dir] = results
             return results
         for item in sorted(os.listdir(hdris_dir)):
             item_path = os.path.join(hdris_dir, item)
@@ -404,6 +471,7 @@ class MaterialLibraryManager:
                 asset = HDRIAsset(item_path)
                 if asset.hdri_path:
                     results.append(asset)
+        self._hdris_cache[hdris_dir] = results
         return results
 
 
